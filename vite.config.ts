@@ -69,6 +69,7 @@ type FigmaSiteConfiguration = {
   }
 }
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /** Applies /.figma/make/site.json to the generated document shell. */
 function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
   function sanitizeHtmlValue(value: string | undefined): string {
