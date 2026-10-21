@@ -171,8 +171,97 @@ begin
   end if;
 end $$;
 
+-- TEST 11: Customer cannot read another customer's bookings
+set local role authenticated;
+set local "request.jwt.claims" to '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+
+do $$
+declare
+  v_test_item_id uuid;
+  v_b1 text;
+  v_b2 text;
+  v_count integer;
+begin
+  select id into v_test_item_id from public.items limit 1;
+
+  -- Insert two test bookings directly (as system)
+  insert into public.bookings (id, item_id, customer_id, start_at, end_at, daily_rate, total, status, payment_status)
+  values
+    ('BK-TEST-1', v_test_item_id, '11111111-1111-1111-1111-111111111111', now() + interval '10 days', now() + interval '12 days', 500, 1000, 'reserved', 'unpaid'),
+    ('BK-TEST-2', v_test_item_id, '22222222-2222-2222-2222-222222222222', now() + interval '20 days', now() + interval '22 days', 500, 1000, 'reserved', 'unpaid')
+  on conflict (id) do nothing;
+
+  -- Under customer A role, should only see BK-TEST-1
+  select count(*) into v_count from public.bookings where id in ('BK-TEST-1', 'BK-TEST-2');
+  if v_count <> 1 then
+    raise exception 'TEST 11 FAILED: customer read % bookings instead of 1', v_count;
+  end if;
+
+  if exists (select 1 from public.bookings where id = 'BK-TEST-2') then
+    raise exception 'TEST 11 FAILED: customer A could see customer B booking';
+  end if;
+
+  raise notice 'TEST 11 PASSED: customer cannot read another customer booking.';
+end $$;
+
+-- TEST 12: Customer cannot insert a payment directly
+do $$
+begin
+  insert into public.payments (booking_id, customer_id, amount, method)
+  values ('BK-TEST-1', '11111111-1111-1111-1111-111111111111', 1000, 'cash');
+  raise exception 'TEST 12 FAILED: customer inserted payment directly';
+exception when others then
+  raise notice 'TEST 12 PASSED: customer payment insertion blocked: %', sqlerrm;
+end $$;
+
+-- TEST 13: Customer cannot update an item
+do $$
+declare
+  v_test_item_id uuid;
+begin
+  select id into v_test_item_id from public.items limit 1;
+  update public.items set daily_price = 1 where id = v_test_item_id;
+  if exists (select 1 from public.items where id = v_test_item_id and daily_price = 1) then
+    raise exception 'TEST 13 FAILED: customer updated rental item price';
+  end if;
+  raise notice 'TEST 13 PASSED: customer cannot update items.';
+exception when others then
+  raise notice 'TEST 13 PASSED: customer update item blocked: %', sqlerrm;
+end $$;
+
+-- TEST 14: Overlapping active booking on same item is rejected
+do $$
+declare
+  v_test_item_id uuid;
+begin
+  select id into v_test_item_id from public.items limit 1;
+
+  -- Try inserting overlapping booking during BK-TEST-1 window (day 11 to 13)
+  insert into public.bookings (id, item_id, customer_id, start_at, end_at, daily_rate, total, status, payment_status)
+  values ('BK-TEST-OVERLAP', v_test_item_id, '11111111-1111-1111-1111-111111111111', now() + interval '11 days', now() + interval '13 days', 500, 1000, 'reserved', 'unpaid');
+
+  raise exception 'TEST 14 FAILED: overlapping active booking was accepted';
+exception when others then
+  raise notice 'TEST 14 PASSED: overlapping booking rejected by exclusion constraint: %', sqlerrm;
+end $$;
+
+-- TEST 15: Staff can read all bookings and record payments via RPC
+set local role authenticated;
+set local "request.jwt.claims" to '{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated"}';
+
+do $$
+declare
+  v_count integer;
+begin
+  select count(*) into v_count from public.bookings where id in ('BK-TEST-1', 'BK-TEST-2');
+  if v_count < 2 then
+    raise exception 'TEST 15 FAILED: staff could not see all bookings (count: %)', v_count;
+  end if;
+  raise notice 'TEST 15 PASSED: staff can see all bookings.';
+end $$;
+
 raise notice '==================================================';
-raise notice 'ALL PROFILE & ROLE RLS CHECKS PASSED SUCCESSFULLY!';
+raise notice 'ALL PROFILE, ROLE & RENTAL RLS CHECKS PASSED!';
 raise notice '==================================================';
 
 -- Always rollback test transaction

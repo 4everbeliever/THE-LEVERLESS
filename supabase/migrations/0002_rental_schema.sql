@@ -1,9 +1,8 @@
--- Toolshed Rentals: branches, items, bookings, booking extras, payments and maintenance logs
--- Run in the Supabase SQL editor (project ophgpdwzoeuheshcfrrc) or `supabase db push`.
--- Safe to run more than once.
+-- Toolshed Rentals: branches, items, bookings, booking_extras, payments and maintenance_logs
+-- Migration 0002: Real rental schema, RPC functions, and server-side calculations
+-- Safe to run multiple times.
 
 -- 1. Required extensions ----------------------------------------------------
--- btree_gist allows combining standard equality (=) on UUID with range overlap (&&)
 create extension if not exists btree_gist;
 
 -- 2. Sequence for readable booking codes (e.g. BK-2050) ---------------------
@@ -20,16 +19,16 @@ alter table public.branches enable row level security;
 
 -- 4. Items table -------------------------------------------------------------
 create table if not exists public.items (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  category   text not null,
-  branch_id  uuid not null references public.branches (id) on delete restrict,
-  serial     text not null unique,
-  status     text not null default 'Available' check (status in ('Available', 'Rented out', 'Maintenance')),
-  price      numeric(10, 2) not null check (price >= 0),
-  image      text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  category    text not null,
+  branch_id   uuid not null references public.branches (id) on delete restrict,
+  serial      text not null unique,
+  status      text not null default 'available' check (status in ('available', 'rented_out', 'maintenance', 'damaged')),
+  daily_price numeric(10, 2) not null check (daily_price >= 0),
+  image_url   text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
 
 alter table public.items enable row level security;
@@ -38,28 +37,27 @@ alter table public.items enable row level security;
 create table if not exists public.bookings (
   id              text primary key default ('BK-' || nextval('public.booking_seq')::text),
   item_id         uuid not null references public.items (id) on delete restrict,
-  user_id         uuid not null references auth.users (id) on delete cascade,
-  customer_name   text,
-  start_date      timestamptz not null,
-  end_date        timestamptz not null,
+  customer_id     uuid not null references auth.users (id) on delete cascade,
+  start_at        timestamptz not null,
+  end_at          timestamptz not null,
   daily_rate      numeric(10, 2) not null default 0 check (daily_rate >= 0),
   rental_days     integer not null default 1 check (rental_days >= 1),
   rental_subtotal numeric(10, 2) not null default 0 check (rental_subtotal >= 0),
   extras_total    numeric(10, 2) not null default 0 check (extras_total >= 0),
-  total_amount    numeric(10, 2) not null default 0 check (total_amount >= 0),
-  status          text not null default 'Reserved' check (status in ('Reserved', 'Checked out', 'Returned', 'Cancelled')),
-  payment_status  text not null default 'Unpaid' check (payment_status in ('Unpaid', 'Paid', 'Refunded')),
+  total           numeric(10, 2) not null default 0 check (total >= 0),
+  status          text not null default 'reserved' check (status in ('reserved', 'checked_out', 'returned', 'cancelled')),
+  payment_status  text not null default 'unpaid' check (payment_status in ('unpaid', 'partial', 'paid')),
   condition_notes text,
   return_notes    text,
   is_damaged      boolean not null default false,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  constraint valid_dates check (end_date > start_date)
+  constraint valid_dates check (end_at > start_at)
 );
 
 alter table public.bookings enable row level security;
 
--- Enforce no double-booking at the database level with exclusion constraint
+-- Double-booking exclusion constraint: active bookings only
 do $$
 begin
   if not exists (
@@ -69,9 +67,9 @@ begin
       add constraint prevent_overlapping_bookings
       exclude using gist (
         item_id with =,
-        tstzrange(start_date, end_date) with &&
+        tstzrange(start_at, end_at, '[)') with &&
       )
-      where (status in ('Reserved', 'Checked out'));
+      where (status in ('reserved', 'checked_out'));
   end if;
 end $$;
 
@@ -79,11 +77,10 @@ end $$;
 create table if not exists public.booking_extras (
   id          uuid primary key default gen_random_uuid(),
   booking_id  text not null references public.bookings (id) on delete cascade,
-  extra_type  text not null check (extra_type in ('Delivery', 'Insurance', 'Other')),
+  extra_type  text not null check (extra_type in ('delivery', 'insurance', 'other')),
   name        text not null,
-  unit_price  numeric(10, 2) not null check (unit_price >= 0),
   quantity    integer not null default 1 check (quantity >= 1),
-  total_price numeric(10, 2) not null default 0 check (total_price >= 0),
+  price       numeric(10, 2) not null check (price >= 0),
   created_at  timestamptz not null default now()
 );
 
@@ -91,243 +88,366 @@ alter table public.booking_extras enable row level security;
 
 -- 7. Payments table ----------------------------------------------------------
 create table if not exists public.payments (
-  id             uuid primary key default gen_random_uuid(),
-  booking_id     text not null references public.bookings (id) on delete cascade,
-  user_id        uuid not null references auth.users (id) on delete cascade,
-  amount         numeric(10, 2) not null check (amount > 0),
-  payment_method text not null check (payment_method in ('Cash', 'GCash', 'Card', 'Bank transfer')),
-  payment_status text not null default 'Paid' check (payment_status in ('Pending', 'Paid', 'Failed', 'Refunded')),
-  paid_at        timestamptz not null default now(),
-  created_at     timestamptz not null default now()
+  id          uuid primary key default gen_random_uuid(),
+  booking_id  text not null references public.bookings (id) on delete cascade,
+  customer_id uuid not null references auth.users (id) on delete cascade,
+  amount      numeric(10, 2) not null check (amount > 0),
+  method      text not null check (method in ('cash', 'gcash', 'card', 'bank_transfer')),
+  paid_at     timestamptz not null default now(),
+  recorded_by uuid references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now()
 );
 
 alter table public.payments enable row level security;
 
 -- 8. Maintenance Logs table --------------------------------------------------
 create table if not exists public.maintenance_logs (
-  id              uuid primary key default gen_random_uuid(),
-  item_id         uuid not null references public.items (id) on delete cascade,
-  description     text not null,
-  hours_spent     numeric(5, 2) not null default 0 check (hours_spent >= 0),
-  performed_at    date not null default current_date,
-  performed_by_id uuid references auth.users (id) on delete set null,
-  staff_name      text,
-  status          text not null default 'Completed',
-  created_at      timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  item_id      uuid not null references public.items (id) on delete cascade,
+  description  text not null,
+  hours_spent  numeric(5, 2) not null default 0 check (hours_spent >= 0),
+  performed_at date not null default current_date,
+  performed_by uuid references auth.users (id) on delete set null,
+  staff_name   text,
+  created_at   timestamptz not null default now()
 );
 
 alter table public.maintenance_logs enable row level security;
 
--- 9. Server-side Calculations & Business Logic Triggers ----------------------
+-- 9. Indexes -----------------------------------------------------------------
+create index if not exists idx_items_branch on public.items (branch_id);
+create index if not exists idx_bookings_item_dates on public.bookings (item_id, start_at, end_at);
+create index if not exists idx_bookings_customer on public.bookings (customer_id);
+create index if not exists idx_booking_extras_booking on public.booking_extras (booking_id);
+create index if not exists idx_payments_booking on public.payments (booking_id);
+create index if not exists idx_payments_customer on public.payments (customer_id);
+create index if not exists idx_maintenance_logs_item on public.maintenance_logs (item_id);
 
--- Calculate extras line-item total
-create or replace function public.calculate_extra_total()
+-- 10. Automatic updated_at Trigger -------------------------------------------
+create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
-security definer
-set search_path = public
 as $$
 begin
-  new.total_price := round(new.unit_price * new.quantity, 2);
+  new.updated_at := now();
   return new;
 end;
 $$;
 
-drop trigger if exists on_calculate_extra_total on public.booking_extras;
-create trigger on_calculate_extra_total
-  before insert or update on public.booking_extras
-  for each row execute function public.calculate_extra_total();
+drop trigger if exists set_items_updated_at on public.items;
+create trigger set_items_updated_at
+  before update on public.items
+  for each row execute function public.set_updated_at();
 
--- Calculate booking days, daily rate, rental subtotal and total amount on server
-create or replace function public.calculate_booking_totals()
-returns trigger
+drop trigger if exists set_bookings_updated_at on public.bookings;
+create trigger set_bookings_updated_at
+  before update on public.bookings
+  for each row execute function public.set_updated_at();
+
+-- 11. RPC Business Logic Functions (SECURITY DEFINER) ------------------------
+
+-- A. Create booking: calculates days, rate, subtotal, extras and total securely on server
+create or replace function public.create_booking(
+  p_item_id  uuid,
+  p_start_at timestamptz,
+  p_end_at   timestamptz,
+  p_extras   jsonb default '[]'::jsonb
+)
+returns public.bookings
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_daily_rate numeric(10, 2);
+  v_item record;
+  v_customer_id uuid;
   v_days integer;
-  v_extras_sum numeric(10, 2);
+  v_rental_subtotal numeric(10, 2);
+  v_extras_total numeric(10, 2) := 0;
+  v_booking public.bookings;
+  v_extra record;
+  v_extra_price numeric(10, 2);
+  v_extra_qty integer;
 begin
-  -- Fetch current daily price from the items table
-  select price into v_daily_rate
-  from public.items
-  where id = new.item_id;
+  v_customer_id := auth.uid();
+  if v_customer_id is null then
+    raise exception 'You must be signed in to book an item.';
+  end if;
 
-  if v_daily_rate is null then
+  if p_end_at <= p_start_at then
+    raise exception 'End date must be after start date.';
+  end if;
+
+  select id, name, daily_price, status into v_item
+  from public.items
+  where id = p_item_id;
+
+  if v_item.id is null then
     raise exception 'Rental item not found.';
   end if;
 
-  -- Ensure non-staff cannot spoof another user's ID
-  if auth.uid() is not null and not public.is_staff() then
-    new.user_id := auth.uid();
+  if v_item.status in ('maintenance', 'damaged') then
+    raise exception 'This item is currently undergoing maintenance and cannot be booked.';
   end if;
 
-  -- Backfill customer name / email from profile if not provided
-  if new.customer_name is null or trim(new.customer_name) = '' then
-    select email into new.customer_name
-    from public.profiles
-    where id = new.user_id;
+  -- Calculate days (at least 1 full day)
+  v_days := greatest(1, ceil(extract(epoch from (p_end_at - p_start_at)) / 86400)::integer);
+  v_rental_subtotal := round(v_item.daily_price * v_days, 2);
+
+  -- Insert initial booking record
+  insert into public.bookings (
+    item_id,
+    customer_id,
+    start_at,
+    end_at,
+    daily_rate,
+    rental_days,
+    rental_subtotal,
+    extras_total,
+    total,
+    status,
+    payment_status
+  ) values (
+    p_item_id,
+    v_customer_id,
+    p_start_at,
+    p_end_at,
+    v_item.daily_price,
+    v_days,
+    v_rental_subtotal,
+    0,
+    v_rental_subtotal,
+    'reserved',
+    'unpaid'
+  )
+  returning * into v_booking;
+
+  -- Process optional extras
+  if p_extras is not null and jsonb_array_length(p_extras) > 0 then
+    for v_extra in select * from jsonb_to_recordset(p_extras) as x(extra_type text, name text, quantity integer, price numeric) loop
+      v_extra_qty := greatest(1, coalesce(v_extra.quantity, 1));
+      v_extra_price := coalesce(v_extra.price, 0);
+
+      insert into public.booking_extras (
+        booking_id,
+        extra_type,
+        name,
+        quantity,
+        price
+      ) values (
+        v_booking.id,
+        lower(v_extra.extra_type),
+        v_extra.name,
+        v_extra_qty,
+        v_extra_price
+      );
+
+      v_extras_total := v_extras_total + (v_extra_price * v_extra_qty);
+    end loop;
+
+    -- Update booking with final extras total and total
+    update public.bookings
+    set extras_total = v_extras_total,
+        total = rental_subtotal + v_extras_total,
+        updated_at = now()
+    where id = v_booking.id
+    returning * into v_booking;
   end if;
 
-  -- Calculate rental days (minimum 1 calendar day)
-  v_days := greatest(1, (new.end_date::date - new.start_date::date));
-
-  new.daily_rate := v_daily_rate;
-  new.rental_days := v_days;
-  new.rental_subtotal := round(v_daily_rate * v_days, 2);
-
-  -- Sum extras for this booking
-  select coalesce(sum(total_price), 0) into v_extras_sum
-  from public.booking_extras
-  where booking_id = new.id;
-
-  new.extras_total := coalesce(v_extras_sum, coalesce(new.extras_total, 0));
-  new.total_amount := new.rental_subtotal + new.extras_total;
-  new.updated_at := now();
-
-  return new;
+  return v_booking;
+exception
+  when exclusion_violation then
+    raise exception 'This item is already booked for the selected dates.' using errcode = '23P01';
 end;
 $$;
 
-drop trigger if exists on_calculate_booking_totals on public.bookings;
-create trigger on_calculate_booking_totals
-  before insert or update on public.bookings
-  for each row execute function public.calculate_booking_totals();
-
--- Double-booking check trigger (for descriptive error messages before constraint violation)
-create or replace function public.check_booking_overlap()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if new.status in ('Reserved', 'Checked out') then
-    if exists (
-      select 1
-      from public.bookings
-      where item_id = new.item_id
-        and id <> coalesce(new.id, '')
-        and status in ('Reserved', 'Checked out')
-        and tstzrange(start_date, end_date) && tstzrange(new.start_date, new.end_date)
-    ) then
-      raise exception 'This item is already booked for the selected dates.'
-        using errcode = '23P01';
-    end if;
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists on_check_booking_overlap on public.bookings;
-create trigger on_check_booking_overlap
-  before insert or update on public.bookings
-  for each row execute function public.check_booking_overlap();
-
--- Recalculate booking total when an extra is added, modified, or deleted
-create or replace function public.sync_booking_extras_total()
-returns trigger
+-- B. Cancel booking: customer can cancel only their OWN booking while reserved
+create or replace function public.cancel_booking(p_booking_id text)
+returns public.bookings
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_booking_id text;
-  v_extras_sum numeric(10, 2);
+  v_booking public.bookings;
 begin
-  v_booking_id := coalesce(new.booking_id, old.booking_id);
+  select * into v_booking from public.bookings where id = p_booking_id;
+  if v_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
 
-  select coalesce(sum(total_price), 0) into v_extras_sum
-  from public.booking_extras
-  where booking_id = v_booking_id;
+  if v_booking.customer_id <> auth.uid() and not public.is_staff() then
+    raise exception 'You can only cancel your own bookings.';
+  end if;
+
+  if v_booking.status <> 'reserved' then
+    raise exception 'Only reserved bookings can be cancelled.';
+  end if;
 
   update public.bookings
-  set extras_total = v_extras_sum,
-      total_amount = rental_subtotal + v_extras_sum,
-      updated_at = now()
-  where id = v_booking_id;
+  set status = 'cancelled', updated_at = now()
+  where id = p_booking_id
+  returning * into v_booking;
 
-  return coalesce(new, old);
+  return v_booking;
 end;
 $$;
 
-drop trigger if exists on_sync_booking_extras_total on public.booking_extras;
-create trigger on_sync_booking_extras_total
-  after insert or update or delete on public.booking_extras
-  for each row execute function public.sync_booking_extras_total();
-
--- Synchronize item status on checkout and return
-create or replace function public.sync_item_status_on_booking()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if new.status = 'Checked out' then
-    update public.items set status = 'Rented out', updated_at = now() where id = new.item_id;
-  elsif new.status = 'Returned' then
-    if new.is_damaged then
-      update public.items set status = 'Maintenance', updated_at = now() where id = new.item_id;
-    else
-      update public.items set status = 'Available', updated_at = now() where id = new.item_id;
-    end if;
-  elsif new.status = 'Cancelled' and old.status in ('Reserved', 'Checked out') then
-    if not exists (
-      select 1 from public.bookings
-      where item_id = new.item_id
-        and id <> new.id
-        and status = 'Checked out'
-    ) then
-      update public.items set status = 'Available', updated_at = now() where id = new.item_id and status = 'Rented out';
-    end if;
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists on_booking_status_change on public.bookings;
-create trigger on_booking_status_change
-  after insert or update of status, is_damaged on public.bookings
-  for each row execute function public.sync_item_status_on_booking();
-
--- Auto-mark booking as Paid when payments equal or exceed total_amount
-create or replace function public.sync_booking_payment_status()
-returns trigger
+-- C. Check out booking: staff/admin only, transitions item to rented_out
+create or replace function public.check_out_booking(
+  p_booking_id      text,
+  p_condition_notes text default null
+)
+returns public.bookings
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_total_paid numeric(10, 2);
-  v_booking_total numeric(10, 2);
+  v_booking public.bookings;
 begin
-  select total_amount into v_booking_total
-  from public.bookings
-  where id = new.booking_id;
-
-  select coalesce(sum(amount), 0) into v_total_paid
-  from public.payments
-  where booking_id = new.booking_id and payment_status = 'Paid';
-
-  if v_total_paid >= coalesce(v_booking_total, 0) then
-    update public.bookings
-    set payment_status = 'Paid', updated_at = now()
-    where id = new.booking_id;
+  if not public.is_staff() then
+    raise exception 'Only staff or admin can check out equipment.';
   end if;
 
-  return new;
+  select * into v_booking from public.bookings where id = p_booking_id;
+  if v_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
+
+  if v_booking.status <> 'reserved' then
+    raise exception 'Only reserved bookings can be checked out.';
+  end if;
+
+  update public.bookings
+  set status = 'checked_out',
+      condition_notes = coalesce(p_condition_notes, condition_notes),
+      updated_at = now()
+  where id = p_booking_id
+  returning * into v_booking;
+
+  update public.items
+  set status = 'rented_out', updated_at = now()
+  where id = v_booking.item_id;
+
+  return v_booking;
 end;
 $$;
 
-drop trigger if exists on_sync_booking_payment_status on public.payments;
-create trigger on_sync_booking_payment_status
-  after insert or update on public.payments
-  for each row execute function public.sync_booking_payment_status();
+-- D. Return booking: staff/admin only, updates damaged flag and item status
+create or replace function public.return_booking(
+  p_booking_id   text,
+  p_return_notes text,
+  p_damaged      boolean default false
+)
+returns public.bookings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_booking public.bookings;
+  v_new_status text;
+begin
+  if not public.is_staff() then
+    raise exception 'Only staff or admin can process equipment returns.';
+  end if;
 
--- 10. Row Level Security Policies --------------------------------------------
+  select * into v_booking from public.bookings where id = p_booking_id;
+  if v_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
+
+  if v_booking.status <> 'checked_out' then
+    raise exception 'Only checked-out bookings can be returned.';
+  end if;
+
+  update public.bookings
+  set status = 'returned',
+      return_notes = p_return_notes,
+      is_damaged = coalesce(p_damaged, false),
+      updated_at = now()
+  where id = p_booking_id
+  returning * into v_booking;
+
+  v_new_status := case when p_damaged then 'maintenance' else 'available' end;
+
+  update public.items
+  set status = v_new_status, updated_at = now()
+  where id = v_booking.item_id;
+
+  return v_booking;
+end;
+$$;
+
+-- E. Record payment: staff/admin only, recalculates payment_status automatically
+create or replace function public.record_payment(
+  p_booking_id text,
+  p_amount     numeric,
+  p_method     text
+)
+returns public.payments
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_booking public.bookings;
+  v_payment public.payments;
+  v_total_paid numeric(10, 2);
+  v_new_payment_status text;
+begin
+  if not public.is_staff() then
+    raise exception 'Only staff or admin can record payments.';
+  end if;
+
+  select * into v_booking from public.bookings where id = p_booking_id;
+  if v_booking.id is null then
+    raise exception 'Booking not found.';
+  end if;
+
+  if p_amount <= 0 then
+    raise exception 'Payment amount must be greater than zero.';
+  end if;
+
+  insert into public.payments (
+    booking_id,
+    customer_id,
+    amount,
+    method,
+    recorded_by
+  ) values (
+    p_booking_id,
+    v_booking.customer_id,
+    p_amount,
+    lower(p_method),
+    auth.uid()
+  )
+  returning * into v_payment;
+
+  -- Recompute total paid
+  select coalesce(sum(amount), 0) into v_total_paid
+  from public.payments
+  where booking_id = p_booking_id;
+
+  if v_total_paid >= v_booking.total then
+    v_new_payment_status := 'paid';
+  elsif v_total_paid > 0 then
+    v_new_payment_status := 'partial';
+  else
+    v_new_payment_status := 'unpaid';
+  end if;
+
+  update public.bookings
+  set payment_status = v_new_payment_status,
+      updated_at = now()
+  where id = p_booking_id;
+
+  return v_payment;
+end;
+$$;
+
+-- 12. Row Level Security Policies --------------------------------------------
 
 -- Branches
 drop policy if exists "branches_select_authenticated" on public.branches;
@@ -344,65 +464,39 @@ create policy "branches_manage_staff"
   using (public.is_staff())
   with check (public.is_staff());
 
--- Items: signed-in users can read; staff and admin can manage
+-- Items
 drop policy if exists "items_select_authenticated" on public.items;
-drop policy if exists "items_insert_staff"         on public.items;
-drop policy if exists "items_update_staff"         on public.items;
-drop policy if exists "items_delete_staff"         on public.items;
+drop policy if exists "items_manage_staff"         on public.items;
 
 create policy "items_select_authenticated"
   on public.items for select
   to authenticated
   using (true);
 
-create policy "items_insert_staff"
-  on public.items for insert
-  to authenticated
-  with check (public.is_staff());
-
-create policy "items_update_staff"
-  on public.items for update
+create policy "items_manage_staff"
+  on public.items for all
   to authenticated
   using (public.is_staff())
   with check (public.is_staff());
 
-create policy "items_delete_staff"
-  on public.items for delete
-  to authenticated
-  using (public.is_staff());
-
--- Bookings: customers see and create only their own; staff and admin see and manage all
-drop policy if exists "bookings_select"       on public.bookings;
-drop policy if exists "bookings_insert"       on public.bookings;
-drop policy if exists "bookings_update"       on public.bookings;
-drop policy if exists "bookings_delete_staff" on public.bookings;
+-- Bookings
+drop policy if exists "bookings_select"        on public.bookings;
+drop policy if exists "bookings_manage_staff"  on public.bookings;
 
 create policy "bookings_select"
   on public.bookings for select
   to authenticated
-  using (user_id = auth.uid() or public.is_staff());
+  using (customer_id = auth.uid() or public.is_staff());
 
-create policy "bookings_insert"
-  on public.bookings for insert
+create policy "bookings_manage_staff"
+  on public.bookings for all
   to authenticated
-  with check (user_id = auth.uid() or public.is_staff());
+  using (public.is_staff())
+  with check (public.is_staff());
 
-create policy "bookings_update"
-  on public.bookings for update
-  to authenticated
-  using (user_id = auth.uid() or public.is_staff())
-  with check (user_id = auth.uid() or public.is_staff());
-
-create policy "bookings_delete_staff"
-  on public.bookings for delete
-  to authenticated
-  using (public.is_staff());
-
--- Booking Extras: readable & manageable by the booking owner or staff
-drop policy if exists "booking_extras_select" on public.booking_extras;
-drop policy if exists "booking_extras_insert" on public.booking_extras;
-drop policy if exists "booking_extras_update" on public.booking_extras;
-drop policy if exists "booking_extras_delete" on public.booking_extras;
+-- Booking Extras
+drop policy if exists "booking_extras_select"       on public.booking_extras;
+drop policy if exists "booking_extras_manage_staff" on public.booking_extras;
 
 create policy "booking_extras_select"
   on public.booking_extras for select
@@ -411,101 +505,55 @@ create policy "booking_extras_select"
     exists (
       select 1 from public.bookings b
       where b.id = booking_id
-        and (b.user_id = auth.uid() or public.is_staff())
+        and (b.customer_id = auth.uid() or public.is_staff())
     )
   );
 
-create policy "booking_extras_insert"
-  on public.booking_extras for insert
+create policy "booking_extras_manage_staff"
+  on public.booking_extras for all
   to authenticated
-  with check (
-    exists (
-      select 1 from public.bookings b
-      where b.id = booking_id
-        and (b.user_id = auth.uid() or public.is_staff())
-    )
-  );
+  using (public.is_staff())
+  with check (public.is_staff());
 
-create policy "booking_extras_update"
-  on public.booking_extras for update
-  to authenticated
-  using (
-    exists (
-      select 1 from public.bookings b
-      where b.id = booking_id
-        and (b.user_id = auth.uid() or public.is_staff())
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.bookings b
-      where b.id = booking_id
-        and (b.user_id = auth.uid() or public.is_staff())
-    )
-  );
-
-create policy "booking_extras_delete"
-  on public.booking_extras for delete
-  to authenticated
-  using (
-    exists (
-      select 1 from public.bookings b
-      where b.id = booking_id
-        and (b.user_id = auth.uid() or public.is_staff())
-    )
-  );
-
--- Payments: users see/create payments for their bookings; staff see/manage all
+-- Payments: customers read own; staff/admin read & manage
 drop policy if exists "payments_select"       on public.payments;
-drop policy if exists "payments_insert"       on public.payments;
 drop policy if exists "payments_manage_staff" on public.payments;
 
 create policy "payments_select"
   on public.payments for select
   to authenticated
-  using (user_id = auth.uid() or public.is_staff());
-
-create policy "payments_insert"
-  on public.payments for insert
-  to authenticated
-  with check (user_id = auth.uid() or public.is_staff());
+  using (customer_id = auth.uid() or public.is_staff());
 
 create policy "payments_manage_staff"
-  on public.payments for update
+  on public.payments for all
   to authenticated
   using (public.is_staff())
   with check (public.is_staff());
 
--- Maintenance Logs: staff and admin only
+-- Maintenance Logs: staff/admin only
 drop policy if exists "maintenance_select_staff" on public.maintenance_logs;
-drop policy if exists "maintenance_insert_staff" on public.maintenance_logs;
-drop policy if exists "maintenance_update_staff" on public.maintenance_logs;
-drop policy if exists "maintenance_delete_staff" on public.maintenance_logs;
+drop policy if exists "maintenance_manage_staff" on public.maintenance_logs;
 
 create policy "maintenance_select_staff"
   on public.maintenance_logs for select
   to authenticated
   using (public.is_staff());
 
-create policy "maintenance_insert_staff"
-  on public.maintenance_logs for insert
-  to authenticated
-  with check (public.is_staff());
-
-create policy "maintenance_update_staff"
-  on public.maintenance_logs for update
+create policy "maintenance_manage_staff"
+  on public.maintenance_logs for all
   to authenticated
   using (public.is_staff())
   with check (public.is_staff());
 
-create policy "maintenance_delete_staff"
-  on public.maintenance_logs for delete
-  to authenticated
-  using (public.is_staff());
+-- Grant execute on RPC functions to authenticated
+grant execute on function public.create_booking(uuid, timestamptz, timestamptz, jsonb) to authenticated;
+grant execute on function public.cancel_booking(text) to authenticated;
+grant execute on function public.check_out_booking(text, text) to authenticated;
+grant execute on function public.return_booking(text, text, boolean) to authenticated;
+grant execute on function public.record_payment(text, numeric, text) to authenticated;
 
--- 11. Seed Data: Branches and Sample Items -----------------------------------
+-- 13. Seed Data: Bohol Branches and Sample Items -----------------------------
 
--- Seed Bohol branches
 insert into public.branches (name)
 values
   ('Tagbilaran'),
@@ -513,15 +561,14 @@ values
   ('Tubigon')
 on conflict (name) do nothing;
 
--- Seed 6 sample items from mock data
-insert into public.items (name, category, branch_id, serial, status, price, image)
+insert into public.items (name, category, branch_id, serial, status, daily_price, image_url)
 values
   (
     'Makita Cordless Drill',
     'Power tools',
     (select id from public.branches where name = 'Tagbilaran'),
     'MKD-2024-0182',
-    'Available',
+    'available',
     450.00,
     'https://images.unsplash.com/photo-1518709414768-a88981a4515d?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420'
   ),
@@ -530,7 +577,7 @@ values
     'Cutting tools',
     (select id from public.branches where name = 'Panglao'),
     'DCS-2023-0089',
-    'Rented out',
+    'rented_out',
     650.00,
     'https://images.unsplash.com/photo-1513467535987-fd81bc7d62f8?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420'
   ),
@@ -539,7 +586,7 @@ values
     'Power tools',
     (select id from public.branches where name = 'Tagbilaran'),
     'BAG-2024-0115',
-    'Maintenance',
+    'maintenance',
     380.00,
     'https://images.unsplash.com/photo-1694522362256-6c907336af43?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420'
   ),
@@ -548,7 +595,7 @@ values
     'Demolition',
     (select id from public.branches where name = 'Tubigon'),
     'HDR-2024-0042',
-    'Available',
+    'available',
     820.00,
     'https://images.unsplash.com/photo-1546827209-a218e99fdbe9?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420'
   ),
@@ -557,7 +604,7 @@ values
     'Cutting tools',
     (select id from public.branches where name = 'Panglao'),
     'MCM-2023-0106',
-    'Available',
+    'available',
     720.00,
     'https://images.unsplash.com/photo-1738162837672-de9d735a9b90?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420'
   ),
@@ -566,7 +613,7 @@ values
     'Heavy equipment',
     (select id from public.branches where name = 'Tagbilaran'),
     'PCM-2022-0024',
-    'Rented out',
+    'rented_out',
     1350.00,
     'https://images.unsplash.com/photo-1601058268499-e52658b8bb88?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420'
   )
@@ -574,17 +621,16 @@ on conflict (serial) do update set
   name = excluded.name,
   category = excluded.category,
   branch_id = excluded.branch_id,
-  price = excluded.price,
-  image = excluded.image;
+  daily_price = excluded.daily_price,
+  image_url = excluded.image_url;
 
--- Seed sample maintenance logs for existing items
-insert into public.maintenance_logs (item_id, description, performed_at, hours_spent, status, staff_name)
+-- Sample maintenance logs
+insert into public.maintenance_logs (item_id, description, performed_at, hours_spent, staff_name)
 select
   i.id,
   m.description,
   m.performed_at::date,
   m.hours_spent,
-  'Completed',
   m.staff_name
 from (
   values
