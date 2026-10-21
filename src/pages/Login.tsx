@@ -14,32 +14,82 @@ const loginSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters.'),
 })
 
+type AuthMode = 'signin' | 'signup' | 'reset'
+
 export default function Login() {
-  const [isSignUp, setIsSignUp] = useState(false)
+  const [mode, setMode] = useState<AuthMode>('signin')
   const [showPassword, setShowPassword] = useState(false)
   const [authError, setAuthError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [isRecoverySession, setIsRecoverySession] = useState(
+    () => typeof window !== 'undefined' && window.location.hash.includes('type=recovery')
+  )
   const navigate = useNavigate()
   const location = useLocation()
   const { session, isPending: sessionPending } = useAuth()
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
   })
 
-  if (!sessionPending && session) {
+  if (!sessionPending && session && !isRecoverySession) {
     return <Navigate to="/dashboard" replace />
+  }
+
+  const onResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAuthError('')
+    setSuccessMessage('')
+
+    const emailValue = getValues('email')
+    if (!emailValue || !emailValue.includes('@')) {
+      setAuthError('Please enter a valid email address.')
+      return
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(emailValue, {
+      redirectTo: `${window.location.origin}/login`,
+    })
+
+    if (error) {
+      setAuthError(error.message)
+      return
+    }
+
+    setSuccessMessage('Password reset link sent! Please check your email inbox.')
+  }
+
+  const onUpdateNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAuthError('')
+    setSuccessMessage('')
+
+    const passwordValue = getValues('password')
+    if (!passwordValue || passwordValue.length < 8) {
+      setAuthError('Password must be at least 8 characters.')
+      return
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: passwordValue })
+    if (error) {
+      setAuthError(error.message)
+      return
+    }
+
+    setIsRecoverySession(false)
+    navigate('/dashboard', { replace: true })
   }
 
   const onSubmit = async (values: LoginFormValues) => {
     setAuthError('')
     setSuccessMessage('')
 
-    if (isSignUp) {
+    if (mode === 'signup') {
       const { data, error } = await supabase.auth.signUp({
         email: values.email,
         password: values.password,
@@ -54,7 +104,7 @@ export default function Login() {
         navigate('/dashboard', { replace: true })
       } else {
         setSuccessMessage('Account created successfully! You can now sign in with your credentials.')
-        setIsSignUp(false)
+        setMode('signin')
       }
       return
     }
@@ -85,40 +135,62 @@ export default function Login() {
           <span>Tool and equipment rentals across Bohol</span>
         </div>
 
-        <div className="role-toggle" style={{ width: '100%', marginBottom: 20 }}>
-          <button
-            type="button"
-            className={!isSignUp ? 'active' : ''}
-            style={{ flex: 1, padding: '9px 12px', fontSize: 12, textAlign: 'center' }}
-            onClick={() => {
-              setIsSignUp(false)
-              setAuthError('')
-              setSuccessMessage('')
-            }}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            className={isSignUp ? 'active' : ''}
-            style={{ flex: 1, padding: '9px 12px', fontSize: 12, textAlign: 'center' }}
-            onClick={() => {
-              setIsSignUp(true)
-              setAuthError('')
-              setSuccessMessage('')
-            }}
-          >
-            Create account
-          </button>
-        </div>
+        {!isRecoverySession && (
+          <div className="role-toggle" style={{ width: '100%', marginBottom: 20 }}>
+            <button
+              type="button"
+              className={mode === 'signin' ? 'active' : ''}
+              style={{ flex: 1, padding: '9px 12px', fontSize: 12, textAlign: 'center' }}
+              onClick={() => {
+                setMode('signin')
+                setAuthError('')
+                setSuccessMessage('')
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              className={mode === 'signup' ? 'active' : ''}
+              style={{ flex: 1, padding: '9px 12px', fontSize: 12, textAlign: 'center' }}
+              onClick={() => {
+                setMode('signup')
+                setAuthError('')
+                setSuccessMessage('')
+              }}
+            >
+              Create account
+            </button>
+          </div>
+        )}
 
         <div className="login-heading">
-          <span className="eyebrow">{isSignUp ? 'NEW CUSTOMER' : 'ACCOUNT ACCESS'}</span>
-          <h1>{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
+          <span className="eyebrow">
+            {isRecoverySession
+              ? 'NEW PASSWORD'
+              : mode === 'signup'
+                ? 'NEW CUSTOMER'
+                : mode === 'reset'
+                  ? 'PASSWORD RECOVERY'
+                  : 'ACCOUNT ACCESS'}
+          </span>
+          <h1>
+            {isRecoverySession
+              ? 'Choose new password'
+              : mode === 'signup'
+                ? 'Create your account'
+                : mode === 'reset'
+                  ? 'Reset password'
+                  : 'Welcome back'}
+          </h1>
           <p>
-            {isSignUp
-              ? 'Register to rent tools and equipment across Bohol.'
-              : 'Sign in to manage your rentals and bookings.'}
+            {isRecoverySession
+              ? 'Enter a new password for your Toolshed Rentals account.'
+              : mode === 'signup'
+                ? 'Register to rent tools and equipment across Bohol.'
+                : mode === 'reset'
+                  ? 'Enter your email and we’ll send you a password reset link.'
+                  : 'Sign in to manage your rentals and bookings.'}
           </p>
         </div>
 
@@ -126,7 +198,7 @@ export default function Login() {
           <div className="login-alert" role="status" style={{ background: 'var(--green-bg)', borderColor: 'var(--green)' }}>
             <CheckCircle2 size={17} style={{ color: 'var(--green)' }} />
             <div>
-              <strong style={{ color: 'var(--green)' }}>Account created</strong>
+              <strong style={{ color: 'var(--green)' }}>Success</strong>
               <span style={{ color: 'var(--green)' }}>{successMessage}</span>
             </div>
           </div>
@@ -136,69 +208,65 @@ export default function Login() {
           <div className="login-alert" role="alert">
             <AlertCircle size={17} />
             <div>
-              <strong>{isSignUp ? 'Registration failed' : 'We couldn’t sign you in'}</strong>
+              <strong>
+                {mode === 'signup'
+                  ? 'Registration failed'
+                  : mode === 'reset'
+                    ? 'Reset failed'
+                    : 'We couldn’t sign you in'}
+              </strong>
               <span>{authError}</span>
             </div>
           </div>
         )}
 
-        <form className="login-form" onSubmit={handleSubmit(onSubmit)} noValidate>
-          <label className={`field ${errors.email ? 'field-error' : ''}`}>
-            <span className="field-label">Email address</span>
-            <span className="login-input-wrap">
-              <Mail size={16} />
-              <input
-                className="input"
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
-                {...register('email')}
-              />
-            </span>
-            {errors.email && <span className="error-text">{errors.email.message}</span>}
-          </label>
-
-          <label className={`field ${errors.password ? 'field-error' : ''}`}>
-            <span className="field-label">Password</span>
-            <span className="login-input-wrap">
-              <LockKeyhole size={16} />
-              <input
-                className="input"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                placeholder="At least 8 characters"
-                {...register('password')}
-              />
-              <button
-                className="password-toggle"
-                type="button"
-                onClick={() => setShowPassword(value => !value)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </span>
-            {errors.password && <span className="error-text">{errors.password.message}</span>}
-          </label>
-
-          <button className="button button-primary login-submit" type="submit" disabled={isSubmitting}>
-            <span>
-              {isSubmitting
-                ? isSignUp
-                  ? 'Creating account…'
-                  : 'Signing in…'
-                : isSignUp
-                  ? 'Create account'
-                  : 'Sign in'}
-            </span>
-            {!isSubmitting && <ArrowRight size={16} />}
-          </button>
-        </form>
-
-        <p className="login-help">
-          {isSignUp ? (
-            <>
-              Already have an account?{' '}
+        {isRecoverySession ? (
+          <form className="login-form" onSubmit={onUpdateNewPassword}>
+            <label className="field">
+              <span className="field-label">New Password</span>
+              <span className="login-input-wrap">
+                <LockKeyhole size={16} />
+                <input
+                  className="input"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="At least 8 characters"
+                  {...register('password')}
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </span>
+            </label>
+            <button className="button button-primary login-submit" type="submit">
+              <span>Save new password</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        ) : mode === 'reset' ? (
+          <form className="login-form" onSubmit={onResetPassword}>
+            <label className="field">
+              <span className="field-label">Email address</span>
+              <span className="login-input-wrap">
+                <Mail size={16} />
+                <input
+                  className="input"
+                  type="email"
+                  placeholder="you@example.com"
+                  {...register('email')}
+                />
+              </span>
+            </label>
+            <button className="button button-primary login-submit" type="submit">
+              <span>Send reset link</span>
+              <ArrowRight size={16} />
+            </button>
+            <p className="login-help">
+              Remember your password?{' '}
               <button
                 type="button"
                 style={{
@@ -210,38 +278,143 @@ export default function Login() {
                   padding: 0,
                 }}
                 onClick={() => {
-                  setIsSignUp(false)
+                  setMode('signin')
                   setAuthError('')
                   setSuccessMessage('')
                 }}
               >
                 Sign in
               </button>
-            </>
-          ) : (
-            <>
-              Don’t have an account?{' '}
-              <button
-                type="button"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--orange)',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
-                onClick={() => {
-                  setIsSignUp(true)
-                  setAuthError('')
-                  setSuccessMessage('')
-                }}
-              >
-                Create an account
-              </button>
-            </>
-          )}
-        </p>
+            </p>
+          </form>
+        ) : (
+          <form className="login-form" onSubmit={handleSubmit(onSubmit)} noValidate>
+            <label className={`field ${errors.email ? 'field-error' : ''}`}>
+              <span className="field-label">Email address</span>
+              <span className="login-input-wrap">
+                <Mail size={16} />
+                <input
+                  className="input"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  {...register('email')}
+                />
+              </span>
+              {errors.email && <span className="error-text">{errors.email.message}</span>}
+            </label>
+
+            <label className={`field ${errors.password ? 'field-error' : ''}`}>
+              <span className="field-label">Password</span>
+              <span className="login-input-wrap">
+                <LockKeyhole size={16} />
+                <input
+                  className="input"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  placeholder="At least 8 characters"
+                  {...register('password')}
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword(value => !value)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </span>
+              {errors.password && <span className="error-text">{errors.password.message}</span>}
+            </label>
+
+            {mode === 'signin' && (
+              <div style={{ textAlign: 'right', marginTop: -6, marginBottom: 2 }}>
+                <button
+                  type="button"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                  onClick={() => {
+                    setMode('reset')
+                    setAuthError('')
+                    setSuccessMessage('')
+                  }}
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
+
+            <button className="button button-primary login-submit" type="submit" disabled={isSubmitting}>
+              <span>
+                {isSubmitting
+                  ? mode === 'signup'
+                    ? 'Creating account…'
+                    : 'Signing in…'
+                  : mode === 'signup'
+                    ? 'Create account'
+                    : 'Sign in'}
+              </span>
+              {!isSubmitting && <ArrowRight size={16} />}
+            </button>
+          </form>
+        )}
+
+        {!isRecoverySession && mode !== 'reset' && (
+          <p className="login-help">
+            {mode === 'signup' ? (
+              <>
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--orange)',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                  onClick={() => {
+                    setMode('signin')
+                    setAuthError('')
+                    setSuccessMessage('')
+                  }}
+                >
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                Don’t have an account?{' '}
+                <button
+                  type="button"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--orange)',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                  onClick={() => {
+                    setMode('signup')
+                    setAuthError('')
+                    setSuccessMessage('')
+                  }}
+                >
+                  Create an account
+                </button>
+              </>
+            )}
+          </p>
+        )}
       </section>
 
       <aside className="login-aside" aria-hidden="true">
