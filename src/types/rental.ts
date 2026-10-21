@@ -1,8 +1,8 @@
-export type ItemStatus = 'Available' | 'Rented out' | 'Maintenance'
-export type BookingStatus = 'Reserved' | 'Checked out' | 'Returned' | 'Cancelled'
-export type PaymentStatus = 'Unpaid' | 'Paid' | 'Refunded'
-export type PaymentMethod = 'Cash' | 'GCash' | 'Card' | 'Bank transfer'
-export type ExtraType = 'Delivery' | 'Insurance' | 'Other'
+export type ItemStatus = 'Available' | 'Rented out' | 'Maintenance' | 'Damaged' | 'available' | 'rented_out' | 'maintenance' | 'damaged'
+export type BookingStatus = 'Reserved' | 'Checked out' | 'Returned' | 'Cancelled' | 'reserved' | 'checked_out' | 'returned' | 'cancelled'
+export type PaymentStatus = 'Unpaid' | 'Paid' | 'Refunded' | 'Partial' | 'unpaid' | 'paid' | 'partial' | 'refunded'
+export type PaymentMethod = 'Cash' | 'GCash' | 'Card' | 'Bank transfer' | 'cash' | 'gcash' | 'card' | 'bank_transfer'
+export type ExtraType = 'Delivery' | 'Insurance' | 'Other' | 'delivery' | 'insurance' | 'other'
 
 export type Branch = {
   id: string
@@ -18,7 +18,9 @@ export type RentalItem = {
   serial: string
   status: ItemStatus
   price: number
+  daily_price?: number
   image?: string | null
+  image_url?: string | null
   created_at: string
   updated_at: string
   branches?: Branch
@@ -31,6 +33,7 @@ export type BookingExtra = {
   extra_type: ExtraType
   name: string
   unit_price: number
+  price?: number
   quantity: number
   total_price: number
   created_at: string
@@ -40,14 +43,18 @@ export type Booking = {
   id: string
   item_id: string
   user_id: string
+  customer_id?: string
   customer_name?: string | null
   start_date: string
   end_date: string
+  start_at?: string
+  end_at?: string
   daily_rate: number
   rental_days: number
   rental_subtotal: number
   extras_total: number
   total_amount: number
+  total?: number
   status: BookingStatus
   payment_status: PaymentStatus
   condition_notes?: string | null

@@ -11,16 +11,32 @@ export function useItems() {
     queryFn: async (): Promise<RentalItem[]> => {
       const { data, error } = await supabase
         .from('items')
-        .select('id, name, category, branch_id, serial, status, price, image, created_at, updated_at, branches (id, name)')
+        .select('id, name, category, branch_id, serial, status, daily_price, image_url, created_at, updated_at, branches (id, name)')
         .order('created_at', { ascending: true })
 
       if (error) throw error
 
-      return ((data ?? []) as any[]).map(item => ({
-        ...item,
-        price: Number(item.price),
-        branch: item.branches?.name ?? 'Tagbilaran',
-      })) as RentalItem[]
+      return ((data ?? []) as any[]).map(item => {
+        const rawStatus = String(item.status || 'available').toLowerCase()
+        const displayStatus =
+          rawStatus === 'rented_out'
+            ? 'Rented out'
+            : rawStatus === 'maintenance' || rawStatus === 'damaged'
+              ? 'Maintenance'
+              : 'Available'
+
+        const price = Number(item.daily_price ?? item.price ?? 0)
+
+        return {
+          ...item,
+          status: displayStatus,
+          price,
+          daily_price: price,
+          image: item.image_url ?? item.image,
+          image_url: item.image_url ?? item.image,
+          branch: item.branches?.name ?? 'Tagbilaran',
+        }
+      }) as RentalItem[]
     },
   })
 }
@@ -72,9 +88,9 @@ export function useAddItem() {
           serial: input.serial,
           category: input.category,
           branch_id: branchData.id,
-          price: input.price ?? 500,
-          status: 'Available',
-          image: input.image ?? 'https://images.unsplash.com/photo-1504148455328-c376907d081c?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420',
+          daily_price: input.price ?? 500,
+          status: 'available',
+          image_url: input.image ?? 'https://images.unsplash.com/photo-1504148455328-c376907d081c?crop=entropy&cs=tinysrgb&fit=crop&fm=jpg&q=80&w=720&h=420',
         })
         .select()
         .single()

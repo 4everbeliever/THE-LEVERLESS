@@ -60,9 +60,9 @@ export function useCreateMaintenanceLog() {
           description: input.description,
           hours_spent: input.hoursSpent,
           performed_at: input.performedAt,
-          performed_by_id: authData.user?.id ?? null,
+          performed_by: authData.user?.id ?? null,
           staff_name: input.staffName ?? authData.user?.email?.split('@')[0] ?? 'Staff',
-          status: 'Completed',
+          created_at: new Date().toISOString(),
         })
         .select()
         .single()

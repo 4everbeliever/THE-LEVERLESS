@@ -16,22 +16,18 @@ export function useRecordPayment() {
 
   return useMutation({
     mutationFn: async (input: RecordPaymentInput) => {
-      const { data: authData } = await supabase.auth.getUser()
-      if (!authData.user) throw new Error('You must be signed in to make a payment.')
+      // Execute via RPC function record_payment (staff/admin only)
+      const method = input.paymentMethod.toLowerCase().replace(/\s+/g, '_')
+      const { data, error } = await supabase.rpc('record_payment', {
+        p_booking_id: input.bookingId,
+        p_amount: input.amount,
+        p_method: method,
+      })
 
-      const { data, error } = await supabase
-        .from('payments')
-        .insert({
-          booking_id: input.bookingId,
-          user_id: authData.user.id,
-          amount: input.amount,
-          payment_method: input.paymentMethod,
-          payment_status: 'Paid',
-        })
-        .select()
-        .single()
+      if (error) {
+        throw new Error(error.message || 'Failed to record payment.')
+      }
 
-      if (error) throw error
       return data
     },
     onSuccess: () => {
