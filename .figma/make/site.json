@@ -1,0 +1,10 @@
+{
+  "description": "This web application offers a customizable front and backend framework system, enabling businesses to create unique and efficient web solutions tailored to their needs.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
