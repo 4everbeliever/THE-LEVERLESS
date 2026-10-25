@@ -17,9 +17,8 @@ export function useMaintenanceLogs() {
           description,
           hours_spent,
           performed_at,
-          performed_by_id,
+          performed_by,
           staff_name,
-          status,
           created_at,
           items (
             name,
@@ -32,6 +31,8 @@ export function useMaintenanceLogs() {
 
       return ((data ?? []) as any[]).map(log => ({
         ...log,
+        performed_by_id: log.performed_by,
+        status: log.status || 'Completed',
         hours_spent: Number(log.hours_spent),
       })) as MaintenanceLog[]
     },
