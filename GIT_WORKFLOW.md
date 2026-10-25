@@ -25,7 +25,7 @@ If you haven't linked your local repository to GitHub yet, run the following in 
 git branch -M main
 
 # 2. Add your GitHub remote repository URL
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/toolshed-rentals.git
+git remote add origin https://github.com/rjmgamaya/toolshed-rentals.git
 
 # 3. Push the main branch
 git push -u origin main
