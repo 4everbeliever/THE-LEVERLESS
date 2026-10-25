@@ -93,3 +93,64 @@ export type MaintenanceLog = {
     serial: string
   }
 }
+
+export type EquipmentCategory = {
+  id: string
+  code: string
+  name: string
+  description?: string | null
+  safety_guidelines?: string | null
+  created_at: string
+}
+
+export type ExtrasCatalogItem = {
+  id: string
+  code: string
+  extra_type: ExtraType
+  name: string
+  base_price: number
+  description?: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export type BookingItem = {
+  id: string
+  booking_id: string
+  item_id: string
+  daily_rate_at_booking: number
+  quantity: number
+  item_condition_out?: string | null
+  item_condition_in?: string | null
+  checked_out_at?: string | null
+  returned_at?: string | null
+  is_damaged: boolean
+  created_at: string
+  items?: RentalItem
+}
+
+export type MaintenanceTechnician = {
+  id: string
+  maintenance_id: string
+  technician_id: string
+  assigned_role: 'lead_technician' | 'assistant_technician' | 'safety_inspector' | 'quality_auditor'
+  hours_logged: number
+  task_notes?: string | null
+  sign_off_status: 'pending' | 'approved' | 'rejected'
+  signed_off_at?: string | null
+  assigned_at: string
+}
+
+export type AuditLog = {
+  id: string
+  table_name: string
+  record_id: string
+  action: 'INSERT' | 'UPDATE' | 'DELETE'
+  old_data?: Record<string, unknown> | null
+  new_data?: Record<string, unknown> | null
+  changed_fields?: string[] | null
+  performed_by?: string | null
+  client_ip?: string | null
+  created_at: string
+}
+
