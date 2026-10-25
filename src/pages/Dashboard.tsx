@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { FullPageLoader } from '../components/FullPageLoader'
+import { NotificationBell } from '../components/NotificationBell'
 import { useAdminUsers, useUpdateRole } from '../hooks/useAdminUsers'
 import { useAuth } from '../hooks/useAuth'
 import { useBookings, useCheckoutBooking, useCreateBooking, useReturnBooking } from '../hooks/useBookings'
@@ -157,7 +158,7 @@ function Header({ role, realRole, setRole, canPreview, email, onSignOut }: { rol
     {canPreview && <div className="role-toggle" aria-label="Preview role">
       {(['customer', 'staff', 'admin'] as Role[]).map(r => <button key={r} className={role === r ? 'active' : ''} onClick={() => setRole(r)}>{r === 'customer' ? 'Customer' : r === 'staff' ? 'Staff' : 'Admin'}</button>)}
     </div>}
-    <button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button>
+    <NotificationBell />
     <button className="user-menu" onClick={onSignOut} title="Sign out" aria-label="Sign out">
       <span className="avatar">{initialsOf(email)}</span>
       <span className="user-copy"><strong>{displayName(email) || 'Account'}</strong><small>{roleLabels[realRole]}</small></span>

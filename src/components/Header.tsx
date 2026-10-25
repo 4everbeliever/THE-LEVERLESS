@@ -1,4 +1,5 @@
 import { Icon, Logo, displayName, initialsOf, roleLabels, type Role } from './UI'
+import { NotificationBell } from './NotificationBell'
 
 export function Header({
   role,
@@ -34,10 +35,7 @@ export function Header({
           ))}
         </div>
       )}
-      <button className="icon-button notification" aria-label="Notifications">
-        <Icon name="bell" />
-        <span />
-      </button>
+      <NotificationBell />
       <button className="user-menu" onClick={onSignOut} title="Sign out" aria-label="Sign out">
         <span className="avatar">{initialsOf(email)}</span>
         <span className="user-copy">
