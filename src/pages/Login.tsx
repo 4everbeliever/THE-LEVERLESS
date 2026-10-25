@@ -89,42 +89,52 @@ export default function Login() {
     setAuthError('')
     setSuccessMessage('')
 
-    if (mode === 'signup') {
-      const { data, error } = await supabase.auth.signUp({
-        email: values.email,
-        password: values.password,
-      })
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email: values.email,
+          password: values.password,
+        })
+
+        if (error) {
+          setAuthError(error.message)
+          return
+        }
+
+        if (data?.session) {
+          navigate('/dashboard', { replace: true })
+        } else {
+          setSuccessMessage('Account created successfully! Check your email if confirmation is required, then sign in.')
+          setMode('signin')
+        }
+        return
+      }
+
+      const { error } = await supabase.auth.signInWithPassword(values)
 
       if (error) {
         setAuthError(error.message)
         return
       }
 
-      if (data?.session) {
-        navigate('/dashboard', { replace: true })
-      } else {
-        setSuccessMessage('Account created successfully! You can now sign in with your credentials.')
-        setMode('signin')
-      }
-      return
+      const destination =
+        typeof location.state === 'object' &&
+        location.state &&
+        'from' in location.state &&
+        typeof location.state.from === 'string'
+          ? location.state.from
+          : '/dashboard'
+
+      navigate(destination, { replace: true })
+    } catch (error) {
+      setAuthError(
+        error instanceof DOMException && error.name === 'AbortError'
+          ? 'The request timed out while contacting Supabase. Check your connection and try again.'
+          : error instanceof Error
+            ? error.message
+            : 'An unexpected authentication error occurred. Please try again.',
+      )
     }
-
-    const { error } = await supabase.auth.signInWithPassword(values)
-
-    if (error) {
-      setAuthError(error.message)
-      return
-    }
-
-    const destination =
-      typeof location.state === 'object' &&
-      location.state &&
-      'from' in location.state &&
-      typeof location.state.from === 'string'
-        ? location.state.from
-        : '/dashboard'
-
-    navigate(destination, { replace: true })
   }
 
   return (
