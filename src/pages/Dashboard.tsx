@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router'
 import { FullPageLoader } from '../components/FullPageLoader'
 import { NotificationBell } from '../components/NotificationBell'
 import { useAdminUsers, useUpdateRole } from '../hooks/useAdminUsers'
-import { useAuth } from '../hooks/useAuth'
-import { useBookings, useCheckoutBooking, useCreateBooking, useReturnBooking } from '../hooks/useBookings'
-import { useAddItem, useBranches, useItems } from '../hooks/useInventory'
+import { authSessionKey, useAuth } from '../hooks/useAuth'
+import { useQueryClient } from '@tanstack/react-query'
+import { useBookings, useCancelBooking, useCheckoutBooking, useCreateBooking, useReturnBooking } from '../hooks/useBookings'
+import { useAddItem, useBranches, useItems, useResetAllItems, useUpdateItemStatus } from '../hooks/useInventory'
 import { useCreateMaintenanceLog, useMaintenanceLogs } from '../hooks/useMaintenance'
 import { useRecordPayment } from '../hooks/usePayments'
 import { useProfile } from '../hooks/useProfile'
@@ -171,11 +172,13 @@ function PageTitle({ eyebrow, title, copy, action }: { eyebrow: string; title: s
   return <div className="page-heading"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{copy}</p></div>{action}</div>
 }
 
-function Dashboard({ onBook }: { onBook: (item: RentalItem) => void }) {
+function Dashboard({ onBook, role, showToast }: { onBook: (item: RentalItem) => void; role?: Role; showToast?: (msg: string) => void }) {
   const { profile } = useProfile()
   const { data: items = [], isPending: itemsLoading, error: itemsError } = useItems()
   const { data: branches = [] } = useBranches()
   const { data: bookings = [] } = useBookings()
+  const resetInventory = useResetAllItems()
+  const updateItemStatus = useUpdateItemStatus()
   const firstName = displayName(profile?.email ?? '').split(' ')[0] || 'there'
   const [search, setSearch] = useState('')
   const [branch, setBranch] = useState('All branches')
@@ -225,9 +228,23 @@ function Dashboard({ onBook }: { onBook: (item: RentalItem) => void }) {
       </div>
     )}
 
-    <div className="section-heading">
+    <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
       <div><h2>Rental items</h2><p>Browse and manage equipment across all branches.</p></div>
-      <span className="result-count">{filtered.length} items shown</span>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span className="result-count">{filtered.length} items shown</span>
+        <Button
+          variant="secondary"
+          disabled={resetInventory.isPending}
+          onClick={() =>
+            resetInventory.mutate(undefined, {
+              onSuccess: () => showToast?.('All equipment reset to Available and active bookings released!'),
+              onError: err => showToast?.(`Reset notice: ${(err as Error).message}. Run migration 0005 in Supabase.`),
+            })
+          }
+        >
+          {resetInventory.isPending ? 'Resetting…' : 'Make all items Available'}
+        </Button>
+      </div>
     </div>
 
     <Card className="filter-card">
@@ -279,6 +296,23 @@ function Dashboard({ onBook }: { onBook: (item: RentalItem) => void }) {
             >
               {item.status === 'Available' ? 'Book this item' : item.status === 'Maintenance' ? 'Under maintenance' : 'Currently rented'}
             </Button>
+            {role && isStaffRole(role) && item.status !== 'Available' && (
+              <Button
+                variant="ghost"
+                style={{ marginTop: 6, fontSize: 11 }}
+                onClick={() =>
+                  updateItemStatus.mutate(
+                    { id: item.id, status: 'available' },
+                    {
+                      onSuccess: () => showToast?.(`${item.name} is now Available!`),
+                      onError: err => showToast?.(`Failed: ${(err as Error).message}`),
+                    }
+                  )
+                }
+              >
+                Mark Available
+              </Button>
+            )}
           </div>
         </Card>)}
       </div>
@@ -296,8 +330,9 @@ function EmptyState({ title, copy, action }: { title: string; copy: string; acti
   return <Card className="empty-state"><span className="empty-icon"><Icon name="search" size={24}/></span><h3>{title}</h3><p>{copy}</p>{action}</Card>
 }
 
-function Bookings({ role, openModal }: { role: Role; openModal: (type: ModalType, booking?: Booking) => void }) {
+function Bookings({ role, openModal, showToast }: { role: Role; openModal: (type: ModalType, booking?: Booking) => void; showToast?: (msg: string) => void }) {
   const { data: bookings = [], isPending, error } = useBookings()
+  const cancelBooking = useCancelBooking()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All statuses')
 
@@ -373,6 +408,19 @@ function Bookings({ role, openModal }: { role: Role; openModal: (type: ModalType
                     <div className="row-actions">
                       {booking.payment_status === 'Unpaid' && (
                         <Button variant="secondary" onClick={() => openModal('pay', booking)}>Pay</Button>
+                      )}
+                      {booking.status === 'Reserved' && (
+                        <Button
+                          variant="ghost"
+                          onClick={() =>
+                            cancelBooking.mutate(booking.id, {
+                              onSuccess: () => showToast?.(`Booking ${booking.id} cancelled. Item released.`),
+                              onError: err => showToast?.(`Failed to cancel: ${(err as Error).message}`),
+                            })
+                          }
+                        >
+                          Cancel
+                        </Button>
                       )}
                       {isStaffRole(role) && booking.status === 'Reserved' && (
                         <Button variant="secondary" onClick={() => openModal('checkout', booking)}>Check out</Button>
@@ -959,6 +1007,7 @@ function MobileNav({ page, setPage, role }: { page: Page; setPage: (p: Page) => 
 
 export default function App() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { user } = useAuth()
   const { profile, role: realRole, isAdmin, isPending, error: profileError } = useProfile()
   const [previewRole, setPreviewRole] = useState<Role | null>(null)
@@ -979,6 +1028,7 @@ export default function App() {
   }
 
   const signOut = async () => {
+    queryClient.setQueryData(authSessionKey, null)
     await supabase.auth.signOut()
     navigate('/login', { replace: true })
   }
@@ -1021,8 +1071,8 @@ export default function App() {
             <span>Roles are not set up yet, so you are seeing the customer view. Run supabase/migrations/0001_profiles_and_roles.sql in Supabase.</span>
           </div>
         )}
-        {page === 'inventory' && <Dashboard onBook={bookItem}/>}
-        {page === 'bookings' && <Bookings role={role} openModal={openBookingModal}/>}
+        {page === 'inventory' && <Dashboard onBook={bookItem} role={role} showToast={showToast} />}
+        {page === 'bookings' && <Bookings role={role} openModal={openBookingModal} showToast={showToast} />}
         {page === 'maintenance' && isStaffRole(role) && <Maintenance/>}
         {page === 'add' && isStaffRole(role) && <AddItem done={completedAdd}/>}
         {page === 'users' && role === 'admin' && <UsersPanel currentUserId={profile?.id}/>}

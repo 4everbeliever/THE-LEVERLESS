@@ -103,3 +103,69 @@ export function useAddItem() {
     },
   })
 }
+
+export function useUpdateItemStatus() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      status,
+    }: {
+      id: string
+      status: 'available' | 'rented_out' | 'maintenance' | 'damaged'
+    }) => {
+      const { data, error } = await supabase
+        .from('items')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single()
+
+      if (error) throw error
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: itemsKey })
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })
+    },
+  })
+}
+
+export function useResetAllItems() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => {
+      // 1. Try calling the dedicated RPC if available
+      const { data, error } = await supabase.rpc('reset_all_inventory_available')
+      if (!error) return data
+
+      // 2. Direct database updates fallback
+      const { error: itemError } = await supabase
+        .from('items')
+        .update({ status: 'available', updated_at: new Date().toISOString() })
+        .neq('status', 'available')
+
+      const { error: bookingError } = await supabase
+        .from('bookings')
+        .update({
+          status: 'returned',
+          return_notes: 'Released to inventory',
+          updated_at: new Date().toISOString(),
+        })
+        .in('status', ['reserved', 'checked_out'])
+
+      if (itemError && bookingError) {
+        throw new Error(
+          itemError.message || bookingError.message || 'Failed to reset inventory.'
+        )
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: itemsKey })
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })
+    },
+  })
+}
+

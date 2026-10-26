@@ -1,11 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react'
+import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, LockKeyhole, Mail, Send } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Navigate, useLocation, useNavigate } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { Brand } from '../components/Brand'
-import { useAuth } from '../hooks/useAuth'
+import { authSessionKey, useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import type { LoginFormValues } from '../types/auth'
 
@@ -21,11 +22,13 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [authError, setAuthError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+  const [isResending, setIsResending] = useState(false)
   const [isRecoverySession, setIsRecoverySession] = useState(
     () => typeof window !== 'undefined' && window.location.hash.includes('type=recovery')
   )
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const { session, isPending: sessionPending } = useAuth()
   const {
     register,
@@ -41,12 +44,48 @@ export default function Login() {
     return <Navigate to="/dashboard" replace />
   }
 
+  const isEmailUnconfirmed =
+    Boolean(authError) &&
+    (authError.toLowerCase().includes('email not confirmed') ||
+      authError.toLowerCase().includes('not confirmed'))
+
+  const handleResendConfirmation = async () => {
+    const emailValue = getValues('email')?.trim().toLowerCase()
+    if (!emailValue || !emailValue.includes('@')) {
+      setAuthError('Please enter your email address in the field below first.')
+      return
+    }
+
+    setIsResending(true)
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: emailValue,
+      })
+
+      if (error) {
+        if (error.message.toLowerCase().includes('rate limit')) {
+          setAuthError('Supabase email rate limit exceeded. If testing locally, disable "Confirm email" in Supabase Dashboard (Authentication > Providers > Email) or run migration 0004 in the SQL editor.')
+        } else {
+          setAuthError(error.message)
+        }
+      } else {
+        setSuccessMessage(`Confirmation email resent to ${emailValue}. Please check your inbox and spam folder.`)
+        setAuthError('')
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Failed to resend confirmation email.')
+    } finally {
+      setIsResending(false)
+    }
+  }
+
   const onResetPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setAuthError('')
     setSuccessMessage('')
 
-    const emailValue = getValues('email')
+    const emailValue = getValues('email')?.trim().toLowerCase()
     if (!emailValue || !emailValue.includes('@')) {
       setAuthError('Please enter a valid email address.')
       return
@@ -89,32 +128,56 @@ export default function Login() {
     setAuthError('')
     setSuccessMessage('')
 
+    const cleanEmail = values.email.trim().toLowerCase()
+    const cleanPassword = values.password
+
     try {
       if (mode === 'signup') {
         const { data, error } = await supabase.auth.signUp({
-          email: values.email,
-          password: values.password,
+          email: cleanEmail,
+          password: cleanPassword,
         })
 
         if (error) {
-          setAuthError(error.message)
+          if (error.message.toLowerCase().includes('rate limit')) {
+            setAuthError('Supabase email rate limit exceeded. In your Supabase Dashboard, go to Authentication > Providers > Email and turn off "Confirm email", or run migration 0004 in the SQL editor.')
+          } else {
+            setAuthError(error.message)
+          }
+          return
+        }
+
+        // Supabase returns empty identities when email is already registered
+        if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          setAuthError('An account with this email address already exists. Please sign in with your password, or use "Forgot password?" below.')
+          setMode('signin')
           return
         }
 
         if (data?.session) {
+          // Immediately set cache so ProtectedRoute does not redirect
+          queryClient.setQueryData(authSessionKey, data.session)
           navigate('/dashboard', { replace: true })
         } else {
-          setSuccessMessage('Account created successfully! Check your email if confirmation is required, then sign in.')
+          setSuccessMessage('Account created successfully! Check your email inbox for the confirmation link if required, then sign in.')
           setMode('signin')
         }
         return
       }
 
-      const { error } = await supabase.auth.signInWithPassword(values)
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPassword,
+      })
 
       if (error) {
         setAuthError(error.message)
         return
+      }
+
+      if (data?.session) {
+        // Synchronously update query cache before navigating
+        queryClient.setQueryData(authSessionKey, data.session)
       }
 
       const destination =
@@ -214,7 +277,57 @@ export default function Login() {
           </div>
         )}
 
-        {authError && (
+        {isEmailUnconfirmed ? (
+          <div
+            className="login-alert"
+            role="alert"
+            style={{
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              color: '#92400e',
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+              padding: 14,
+              borderRadius: 8,
+              marginBottom: 16,
+            }}
+          >
+            <AlertCircle size={18} style={{ color: '#b45309', flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong style={{ color: '#92400e', fontSize: 13, fontWeight: 700, display: 'block' }}>
+                Email Confirmation Required
+              </strong>
+              <p style={{ color: '#b45309', fontSize: 12, margin: '4px 0 10px', lineHeight: 1.45 }}>
+                Your account was created, but your email address has not been confirmed yet. Please check your inbox (and spam folder) for the confirmation link.
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={isResending}
+                  onClick={handleResendConfirmation}
+                  style={{ fontSize: 11, padding: '5px 12px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Send size={12} />
+                  <span>{isResending ? 'Sending link…' : 'Resend confirmation email'}</span>
+                </button>
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: '#78350f',
+                  borderTop: '1px dashed #fcd34d',
+                  paddingTop: 8,
+                  marginTop: 6,
+                  lineHeight: 1.4,
+                }}
+              >
+                🛠️ <strong>Instant fix for local testing:</strong> In your Supabase Dashboard, go to <em>Authentication &gt; Providers &gt; Email</em> and turn off <em>Confirm email</em>, or execute <code>supabase/migrations/0004_auto_confirm_and_auth_fixes.sql</code> in the Supabase SQL editor.
+              </div>
+            </div>
+          </div>
+        ) : authError ? (
           <div className="login-alert" role="alert">
             <AlertCircle size={17} />
             <div>
@@ -228,7 +341,7 @@ export default function Login() {
               <span>{authError}</span>
             </div>
           </div>
-        )}
+        ) : null}
 
         {isRecoverySession ? (
           <form className="login-form" onSubmit={onUpdateNewPassword}>
