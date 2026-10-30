@@ -339,3 +339,36 @@ $$;
 
 grant execute on function public.record_payment(text, numeric, text) to authenticated;
 
+-- ============================================================================
+-- 4. PUBLIC STOREFRONT READ POLICIES (Allow Unauthenticated Catalog Browsing)
+-- ============================================================================
+-- Visitors on the landing page can view tools, categories and branches without signing in.
+-- Mutations (INSERT/UPDATE/DELETE) remain strictly locked down to staff and administrators.
+
+drop policy if exists "items_select_authenticated" on public.items;
+drop policy if exists "items_select_public"        on public.items;
+create policy "items_select_public"
+  on public.items for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "branches_select_authenticated" on public.branches;
+drop policy if exists "branches_select_public"        on public.branches;
+create policy "branches_select_public"
+  on public.branches for select
+  to anon, authenticated
+  using (true);
+
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_name = 'equipment_categories' and table_schema = 'public') then
+    drop policy if exists "categories_select_authenticated" on public.equipment_categories;
+    drop policy if exists "categories_select_public"        on public.equipment_categories;
+    create policy "categories_select_public"
+      on public.equipment_categories for select
+      to anon, authenticated
+      using (true);
+  end if;
+end $$;
+
+
