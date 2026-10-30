@@ -53,6 +53,7 @@ export type Booking = {
   rental_days: number
   rental_subtotal: number
   extras_total: number
+  security_deposit?: number
   total_amount: number
   total?: number
   status: BookingStatus
@@ -60,6 +61,7 @@ export type Booking = {
   condition_notes?: string | null
   return_notes?: string | null
   is_damaged: boolean
+  is_overdue?: boolean
   created_at: string
   updated_at: string
   items?: RentalItem
@@ -125,6 +127,7 @@ export type BookingItem = {
   checked_out_at?: string | null
   returned_at?: string | null
   is_damaged: boolean
+  is_overdue?: boolean
   created_at: string
   items?: RentalItem
 }

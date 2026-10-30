@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { AlertCircle, ArrowRight, CheckCircle2, Eye, EyeOff, LockKeyhole, Mail, Send } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { Brand } from '../components/Brand'
@@ -203,8 +203,26 @@ export default function Login() {
   return (
     <main className="login-page">
       <section className="login-card">
+        <div style={{ marginBottom: 14 }}>
+          <Link
+            to="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--muted)',
+              textDecoration: 'none',
+            }}
+          >
+            ← Back to Equipment Catalog
+          </Link>
+        </div>
         <div className="login-brand">
-          <Brand />
+          <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }} title="Return to homepage">
+            <Brand />
+          </Link>
           <span>Tool and equipment rentals across Bohol</span>
         </div>
 

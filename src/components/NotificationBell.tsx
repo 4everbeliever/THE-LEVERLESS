@@ -1,46 +1,79 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './UI'
+import { useItems } from '../hooks/useInventory'
+import { useBookings } from '../hooks/useBookings'
 
 export type AppNotification = {
   id: string
   title: string
   message: string
   time: string
-  type: 'info' | 'warning' | 'success'
+  type: 'info' | 'warning' | 'success' | 'alert'
   isRead: boolean
 }
 
-const INITIAL_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: 'notif-1',
-    title: 'Equipment in Maintenance',
-    message: 'Bosch Angle Grinder (BAG-2024-0115) scheduled for carbon brush inspection.',
-    time: '25m ago',
-    type: 'warning',
-    isRead: false,
-  },
-  {
-    id: 'notif-2',
-    title: 'New Booking Active',
-    message: 'Makita Cordless Drill booked for Tagbilaran branch dispatch.',
-    time: '2h ago',
-    type: 'success',
-    isRead: false,
-  },
-  {
-    id: 'notif-3',
-    title: 'Database Cloud Engine',
-    message: 'Supabase PostgreSQL cluster (Bohol branches) synchronized with 12 normalized tables.',
-    time: 'Today',
-    type: 'info',
-    isRead: false,
-  },
-]
-
 export function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false)
-  const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS)
+  const { data: items = [] } = useItems()
+  const { data: bookings = [] } = useBookings()
+  const [readIds, setReadIds] = useState<Set<string>>(() => new Set())
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Generate dynamic operational notifications from real database state
+  const notifications = useMemo<AppNotification[]>(() => {
+    const list: AppNotification[] = []
+
+    // 1. Check for overdue bookings
+    const overdueBookings = bookings.filter(b => b.is_overdue)
+    overdueBookings.forEach(b => {
+      list.push({
+        id: `overdue-${b.id}`,
+        title: '⚠️ Equipment Overdue',
+        message: `${b.item_name} (${b.id}) is past scheduled return time. Contact renter.`,
+        time: 'Immediate',
+        type: 'warning',
+        isRead: readIds.has(`overdue-${b.id}`),
+      })
+    })
+
+    // 2. Check for maintenance items
+    const maintItems = items.filter(i => i.status === 'Maintenance')
+    maintItems.forEach(i => {
+      list.push({
+        id: `maint-${i.id}`,
+        title: 'Tool Under Maintenance',
+        message: `${i.name} (${i.serial}) undergoing technical servicing at ${i.branch || 'branch'}.`,
+        time: 'Active',
+        type: 'info',
+        isRead: readIds.has(`maint-${i.id}`),
+      })
+    })
+
+    // 3. Check for recently reserved bookings
+    const recentReservations = bookings.filter(b => b.status === 'Reserved').slice(0, 3)
+    recentReservations.forEach(b => {
+      list.push({
+        id: `reserved-${b.id}`,
+        title: 'New Reservation',
+        message: `${b.item_name} reserved for ${b.branch_name || 'pickup'}. Code: ${b.id}.`,
+        time: 'Today',
+        type: 'success',
+        isRead: readIds.has(`reserved-${b.id}`),
+      })
+    })
+
+    // Default system notification
+    list.push({
+      id: 'system-engine',
+      title: 'Database Cloud Engine',
+      message: 'PostgreSQL cluster synchronized across Tagbilaran, Panglao & Tubigon branches.',
+      time: 'Live',
+      type: 'info',
+      isRead: readIds.has('system-engine'),
+    })
+
+    return list
+  }, [items, bookings, readIds])
 
   const unreadCount = notifications.filter(n => !n.isRead).length
 
@@ -60,11 +93,11 @@ export function NotificationBell() {
   }, [isOpen])
 
   const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+    setReadIds(new Set(notifications.map(n => n.id)))
   }
 
   const markItemAsRead = (id: string) => {
-    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, isRead: true } : n)))
+    setReadIds(prev => new Set([...prev, id]))
   }
 
   return (
@@ -98,26 +131,22 @@ export function NotificationBell() {
           </div>
 
           <div className="notifications-popover-list">
-            {notifications.length > 0 ? (
-              notifications.map(n => (
-                <div
-                  key={n.id}
-                  className={`notifications-popover-item ${n.isRead ? 'read' : 'unread'}`}
-                  onClick={() => markItemAsRead(n.id)}
-                >
-                  <div className={`notif-icon-badge ${n.type}`}>
-                    <Icon name={n.type === 'warning' ? 'wrench' : n.type === 'success' ? 'check' : 'alert'} size={14} />
+            {notifications.map(notif => (
+              <div
+                key={notif.id}
+                className={`notifications-popover-item ${notif.isRead ? 'read' : 'unread'} ${notif.type}`}
+                onClick={() => markItemAsRead(notif.id)}
+              >
+                <div className="notif-content">
+                  <div className="notif-title-row">
+                    <strong>{notif.title}</strong>
+                    <span className="notif-time">{notif.time}</span>
                   </div>
-                  <div className="notif-body">
-                    <strong>{n.title}</strong>
-                    <p>{n.message}</p>
-                    <small>{n.time}</small>
-                  </div>
+                  <p>{notif.message}</p>
                 </div>
-              ))
-            ) : (
-              <div className="notifications-empty">No notifications yet.</div>
-            )}
+                {!notif.isRead && <span className="unread-dot" />}
+              </div>
+            ))}
           </div>
         </div>
       )}

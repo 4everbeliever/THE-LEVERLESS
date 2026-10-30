@@ -17,7 +17,9 @@ export function Sidebar({ page, setPage, role }: { page: Page; setPage: (page: P
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <Logo />
+        <a href="/" style={{ textDecoration: 'none', color: 'inherit' }} title="Visit public intro website">
+          <Logo />
+        </a>
       </div>
       <nav className="side-nav">
         <span className="nav-label">WORKSPACE</span>
@@ -32,6 +34,10 @@ export function Sidebar({ page, setPage, role }: { page: Page; setPage: (page: P
             {page === link.id && <span className="nav-indicator" />}
           </button>
         ))}
+        <a href="/" className="nav-link" style={{ marginTop: 6, opacity: 0.85 }} title="Visit public equipment catalog">
+          <Icon name="arrow" />
+          <span>View Storefront</span>
+        </a>
       </nav>
       <div className="branch-card">
         <span className="branch-icon">

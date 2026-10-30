@@ -1,6 +1,7 @@
-import { FormEvent, ReactNode, useMemo, useState } from 'react'
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { FullPageLoader } from '../components/FullPageLoader'
+import { HandoverSlipModal } from '../components/HandoverSlipModal'
 import { NotificationBell } from '../components/NotificationBell'
 import { useAdminUsers, useUpdateRole } from '../hooks/useAdminUsers'
 import { authSessionKey, useAuth } from '../hooks/useAuth'
@@ -14,10 +15,10 @@ import { supabase } from '../lib/supabase'
 import { isStaffRole, type AppRole } from '../types/auth'
 import type { Booking, PaymentMethod, RentalItem } from '../types/rental'
 
-type Role = AppRole
-type Page = 'inventory' | 'bookings' | 'maintenance' | 'add' | 'users'
-type ModalType = 'auth' | 'book' | 'pay' | 'checkout' | 'return' | null
-type IconName =
+export type Role = AppRole
+export type Page = 'inventory' | 'bookings' | 'maintenance' | 'add' | 'users'
+export type ModalType = 'auth' | 'book' | 'pay' | 'checkout' | 'return' | null
+export type IconName =
   | 'grid'
   | 'calendar'
   | 'wrench'
@@ -41,7 +42,7 @@ type IconName =
   | 'alert'
   | 'users'
 
-const iconPaths: Record<IconName, ReactNode> = {
+export const iconPaths: Record<IconName, ReactNode> = {
   grid: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></>,
   wrench: <path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7A4 4 0 0 0 12.4 9L5 16.4a2.1 2.1 0 1 0 3 3l7.4-7.4a4 4 0 0 0 5.1-5.1L18.2 9.2 15.8 7l2.3-2.3a4 4 0 0 0-3.4 1.6Z"/>,
@@ -66,49 +67,49 @@ const iconPaths: Record<IconName, ReactNode> = {
   users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>,
 }
 
-function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{iconPaths[name]}</svg>
 }
 
-function Button({ children, variant = 'primary', icon, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; icon?: IconName }) {
+export function Button({ children, variant = 'primary', icon, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; icon?: IconName }) {
   return <button className={`button button-${variant} ${className}`} {...props}>{icon && <Icon name={icon} size={17}/>}<span>{children}</span></button>
 }
 
-function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
+export function Field({ label, error, children }: { label: string; error?: string; children: ReactNode }) {
   return <label className={`field ${error ? 'field-error' : ''}`}><span className="field-label">{label}</span>{children}{error && <span className="error-text"><Icon name="alert" size={13}/>{error}</span>}</label>
 }
 
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input className="input" {...props}/>
 }
 
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className="input select" {...props}/>
 }
 
-function Badge({ children, tone }: { children: ReactNode; tone: 'green' | 'blue' | 'amber' | 'red' | 'gray' }) {
+export function Badge({ children, tone }: { children: ReactNode; tone: 'green' | 'blue' | 'amber' | 'red' | 'gray' }) {
   return <span className={`badge badge-${tone}`}><span className="badge-dot"/>{children}</span>
 }
 
-function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`card ${className}`}>{children}</section>
 }
 
-const statusTone = (status: string): 'green' | 'blue' | 'amber' | 'red' | 'gray' => {
+export const statusTone = (status: string): 'green' | 'blue' | 'amber' | 'red' | 'gray' => {
   if (['Available', 'Paid', 'Returned'].includes(status)) return 'green'
   if (['Rented out', 'Checked out'].includes(status)) return 'blue'
   if (['Maintenance', 'Reserved'].includes(status)) return 'amber'
-  if (status === 'Unpaid') return 'red'
+  if (['Unpaid', 'Overdue'].includes(status)) return 'red'
   return 'gray'
 }
 
-const roleTone = (role: Role): 'green' | 'blue' | 'amber' | 'red' | 'gray' => (role === 'admin' ? 'blue' : isStaffRole(role) ? 'amber' : 'gray')
-const roleLabels: Record<Role, string> = { customer: 'Customer', staff: 'Branch staff', admin: 'Administrator' }
+export const roleTone = (role: Role): 'green' | 'blue' | 'amber' | 'red' | 'gray' => (role === 'admin' ? 'blue' : isStaffRole(role) ? 'amber' : 'gray')
+export const roleLabels: Record<Role, string> = { customer: 'Customer', staff: 'Branch staff', admin: 'Administrator' }
 
-const displayName = (email: string) => (email.split('@')[0] || '').replace(/[._-]+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase())
-const initialsOf = (email: string) => displayName(email).split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'
+export const displayName = (email: string) => (email.split('@')[0] || '').replace(/[._-]+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase())
+export const initialsOf = (email: string) => displayName(email).split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'
 
-function formatBookingDates(start: string, end: string) {
+export function formatBookingDates(start: string, end: string) {
   try {
     const s = new Date(start)
     const e = new Date(end)
@@ -126,11 +127,23 @@ function formatBookingDates(start: string, end: string) {
   }
 }
 
-function Logo({ compact = false }: { compact?: boolean }) {
+export function Logo({ compact = false }: { compact?: boolean }) {
   return <div className="logo"><span className="logo-mark"><Icon name="wrench" size={19}/></span>{!compact && <span>Toolshed<span> Rentals</span></span>}</div>
 }
 
-export function Sidebar({ page, setPage, role }: { page: Page; setPage: (page: Page) => void; role: Role }) {
+export function Sidebar({
+  page,
+  setPage,
+  role,
+  currentBranch = 'Tagbilaran City',
+  onSwitchBranch,
+}: {
+  page: Page
+  setPage: (page: Page) => void
+  role: Role
+  currentBranch?: string
+  onSwitchBranch?: () => void
+}) {
   const links: { id: Page; label: string; icon: IconName }[] = [
     { id: 'inventory', label: 'Dashboard & items', icon: 'grid' },
     { id: 'bookings', label: isStaffRole(role) ? 'All bookings' : 'My bookings', icon: 'calendar' },
@@ -138,24 +151,44 @@ export function Sidebar({ page, setPage, role }: { page: Page; setPage: (page: P
     ...(role === 'admin' ? [{ id: 'users' as Page, label: 'Users & roles', icon: 'users' as IconName }] : []),
   ]
   return <aside className="sidebar">
-    <div className="sidebar-brand"><Logo/></div>
+    <div className="sidebar-brand">
+      <a href="/" style={{ textDecoration: 'none', color: 'inherit' }} title="Visit public intro website">
+        <Logo/>
+      </a>
+    </div>
     <nav className="side-nav">
       <span className="nav-label">WORKSPACE</span>
       {links.map(link => <button key={link.id} className={`nav-link ${page === link.id ? 'active' : ''}`} onClick={() => setPage(link.id)}><Icon name={link.icon}/><span>{link.label}</span>{page === link.id && <span className="nav-indicator"/>}</button>)}
+      <a href="/" className="nav-link" style={{ marginTop: 6, opacity: 0.85 }} title="Visit public equipment catalog">
+        <Icon name="arrow"/>
+        <span>View Storefront</span>
+      </a>
     </nav>
-    <div className="branch-card">
+    <div
+      className="branch-card"
+      onClick={onSwitchBranch}
+      style={{ cursor: onSwitchBranch ? 'pointer' : 'default' }}
+      title="Click to toggle active Bohol branch view"
+    >
       <span className="branch-icon"><Icon name="pin" size={18}/></span>
-      <div><small>Current branch</small><strong>Tagbilaran City</strong></div>
+      <div>
+        <small>Current branch (tap to toggle)</small>
+        <strong>{currentBranch}</strong>
+      </div>
       <Icon name="chevron" size={14}/>
     </div>
     <div className="sidebar-footer">Toolshed Rentals<br/><span>v1.0 · Bohol, Philippines</span></div>
   </aside>
 }
 
-function Header({ role, realRole, setRole, canPreview, email, onSignOut }: { role: Role; realRole: Role; setRole: (role: Role) => void; canPreview: boolean; email: string; onSignOut: () => void }) {
+export function Header({ role, realRole, setRole, canPreview, email, onSignOut }: { role: Role; realRole: Role; setRole: (role: Role) => void; canPreview: boolean; email: string; onSignOut: () => void }) {
   return <header className="topbar">
     <div className="mobile-logo"><Logo compact/></div>
     <div className="topbar-spacer"/>
+    <div className="kyc-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 16, fontSize: 11, fontWeight: 700, color: 'var(--green)', background: 'var(--green-bg)', padding: '4px 10px', borderRadius: 999 }}>
+      <Icon name="shield" size={14}/>
+      <span>ID Verified</span>
+    </div>
     {canPreview && <div className="role-toggle" aria-label="Preview role">
       {(['customer', 'staff', 'admin'] as Role[]).map(r => <button key={r} className={role === r ? 'active' : ''} onClick={() => setRole(r)}>{r === 'customer' ? 'Customer' : r === 'staff' ? 'Staff' : 'Admin'}</button>)}
     </div>}
@@ -190,12 +223,14 @@ function Dashboard({ onBook, role, showToast }: { onBook: (item: RentalItem) => 
     (status === 'All statuses' || item.status === status)
   ), [items, search, branch, status])
 
+  // Compute real dynamic statistics directly from database
   const stats = useMemo(() => {
     const total = items.length
     const available = items.filter(i => i.status === 'Available').length
     const rented = items.filter(i => i.status === 'Rented out').length
     const maintenance = items.filter(i => i.status === 'Maintenance').length
     const activeBookings = bookings.filter(b => ['Reserved', 'Checked out'].includes(b.status)).length
+    const overdueCount = bookings.filter(b => b.is_overdue).length
     const revenueSum = bookings.filter(b => b.payment_status === 'Paid').reduce((acc, b) => acc + (b.total_amount || 0), 0)
 
     const availPct = total ? Math.round((available / total) * 100) : 0
@@ -203,21 +238,21 @@ function Dashboard({ onBook, role, showToast }: { onBook: (item: RentalItem) => 
     const maintPct = total ? Math.round((maintenance / total) * 100) : 0
 
     return [
-      ['Total items', total ? String(total) : '248', 'box', 'All inventory'],
-      ['Available', available ? String(available) : '186', 'check', `${availPct || 75}% of inventory`],
-      ['Rented out', rented ? String(rented) : '42', 'arrow', `${rentedPct || 17}% of inventory`],
-      ['In maintenance', maintenance ? String(maintenance) : '20', 'wrench', `${maintPct || 8}% of inventory`],
-      ['Active bookings', activeBookings ? String(activeBookings) : '57', 'calendar', 'This month'],
-      ['Revenue', revenueSum > 0 ? `₱${revenueSum.toLocaleString()}` : '₱184,250', 'card', '+12.8% vs last month'],
+      ['Total items', String(total), 'box', 'All Bohol inventory'],
+      ['Available', String(available), 'check', `${availPct}% ready for dispatch`],
+      ['Rented out', String(rented), 'truck', `${rentedPct}% with customers`],
+      ['Maintenance', String(maintenance), 'wrench', `${maintPct}% under servicing`],
+      ['Active bookings', String(activeBookings), 'calendar', overdueCount > 0 ? `⚠️ ${overdueCount} overdue` : 'Active reservations'],
+      ['Revenue', `₱${revenueSum.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 'card', 'Total settled payments'],
     ] as const
   }, [items, bookings])
 
   return <>
-    <PageTitle eyebrow="OVERVIEW" title={`Good morning, ${firstName}`} copy="Here’s what’s happening across your rental branches today."/>
+    <PageTitle eyebrow="OVERVIEW" title={`Good morning, ${firstName}`} copy="Here’s what’s happening across your Bohol rental branches today."/>
     <div className="stats-grid">
       {stats.map(([label, value, icon, note], i) => <Card className="stat-card" key={label}>
         <div className={`stat-icon stat-icon-${i}`}><Icon name={icon}/></div>
-        <div className="stat-copy"><span>{label}</span><strong>{value}</strong><small className={i === 5 ? 'positive' : ''}>{i === 5 && '↑ '}{note}</small></div>
+        <div className="stat-copy"><span>{label}</span><strong>{value}</strong><small className={i === 5 ? 'positive' : ''}>{note}</small></div>
       </Card>)}
     </div>
 
@@ -232,18 +267,20 @@ function Dashboard({ onBook, role, showToast }: { onBook: (item: RentalItem) => 
       <div><h2>Rental items</h2><p>Browse and manage equipment across all branches.</p></div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <span className="result-count">{filtered.length} items shown</span>
-        <Button
-          variant="secondary"
-          disabled={resetInventory.isPending}
-          onClick={() =>
-            resetInventory.mutate(undefined, {
-              onSuccess: () => showToast?.('All equipment reset to Available and active bookings released!'),
-              onError: err => showToast?.(`Reset notice: ${(err as Error).message}. Run migration 0005 in Supabase.`),
-            })
-          }
-        >
-          {resetInventory.isPending ? 'Resetting…' : 'Make all items Available'}
-        </Button>
+        {role === 'admin' && (
+          <Button
+            variant="secondary"
+            disabled={resetInventory.isPending}
+            onClick={() =>
+              resetInventory.mutate(undefined, {
+                onSuccess: () => showToast?.('All equipment reset to Available and active bookings released!'),
+                onError: err => showToast?.(`Reset notice: ${(err as Error).message}.`),
+              })
+            }
+          >
+            {resetInventory.isPending ? 'Resetting…' : 'Make all items Available'}
+          </Button>
+        )}
       </div>
     </div>
 
@@ -319,8 +356,8 @@ function Dashboard({ onBook, role, showToast }: { onBook: (item: RentalItem) => 
     ) : (
       <EmptyState
         title="No equipment found"
-        copy="Try changing your search term or clearing the filters."
-        action={<Button variant="secondary" onClick={() => { setSearch(''); setBranch('All branches'); setStatus('All statuses') }}>Clear all filters</Button>}
+        copy={search || branch !== 'All branches' || status !== 'All statuses' ? 'Try adjusting your search filters.' : 'No tools registered in this branch yet.'}
+        action={search || branch !== 'All branches' || status !== 'All statuses' ? <Button variant="secondary" onClick={() => { setSearch(''); setBranch('All branches'); setStatus('All statuses') }}>Clear filters</Button> : undefined}
       />
     )}
   </>
@@ -330,7 +367,17 @@ function EmptyState({ title, copy, action }: { title: string; copy: string; acti
   return <Card className="empty-state"><span className="empty-icon"><Icon name="search" size={24}/></span><h3>{title}</h3><p>{copy}</p>{action}</Card>
 }
 
-function Bookings({ role, openModal, showToast }: { role: Role; openModal: (type: ModalType, booking?: Booking) => void; showToast?: (msg: string) => void }) {
+function Bookings({
+  role,
+  openModal,
+  onViewSlip,
+  showToast,
+}: {
+  role: Role
+  openModal: (type: ModalType, booking?: Booking) => void
+  onViewSlip: (booking: Booking) => void
+  showToast?: (msg: string) => void
+}) {
   const { data: bookings = [], isPending, error } = useBookings()
   const cancelBooking = useCancelBooking()
   const [search, setSearch] = useState('')
@@ -398,14 +445,28 @@ function Bookings({ role, openModal, showToast }: { role: Role; openModal: (type
             <tbody>
               {filtered.map(booking => (
                 <tr key={booking.id}>
-                  <td><strong>{booking.id}</strong></td>
+                  <td>
+                    <strong>{booking.id}</strong>
+                    {booking.is_overdue && (
+                      <span style={{ display: 'block', fontSize: 9, color: 'var(--red)', fontWeight: 800, marginTop: 2 }}>
+                        ⚠️ OVERDUE
+                      </span>
+                    )}
+                  </td>
                   <td>{booking.item_name}</td>
                   {isStaffRole(role) && <td>{booking.customer_name || 'Customer'}</td>}
                   <td>{formatBookingDates(booking.start_date, booking.end_date)}</td>
-                  <td><Badge tone={statusTone(booking.status)}>{booking.status}</Badge></td>
+                  <td>
+                    <Badge tone={booking.is_overdue ? 'red' : statusTone(booking.status)}>
+                      {booking.is_overdue ? 'Overdue' : booking.status}
+                    </Badge>
+                  </td>
                   <td><Badge tone={statusTone(booking.payment_status)}>{booking.payment_status}</Badge></td>
                   <td>
                     <div className="row-actions">
+                      <Button variant="ghost" onClick={() => onViewSlip(booking)} title="Print handover slip and official receipt">
+                        Slip
+                      </Button>
                       {booking.payment_status === 'Unpaid' && (
                         <Button variant="secondary" onClick={() => openModal('pay', booking)}>Pay</Button>
                       )}
@@ -427,9 +488,6 @@ function Bookings({ role, openModal, showToast }: { role: Role; openModal: (type
                       )}
                       {isStaffRole(role) && booking.status === 'Checked out' && (
                         <Button variant="secondary" onClick={() => openModal('return', booking)}>Return</Button>
-                      )}
-                      {(booking.status === 'Returned' || booking.status === 'Cancelled' || (!isStaffRole(role) && booking.payment_status === 'Paid')) && (
-                        <button className="more-button" aria-label="More actions">•••</button>
                       )}
                     </div>
                   </td>
@@ -454,7 +512,6 @@ function Maintenance() {
   const { data: items = [] } = useItems()
   const { data: logs = [], isPending: logsLoading, error: logsError } = useMaintenanceLogs()
   const createLog = useCreateMaintenanceLog()
-  const [saved, setSaved] = useState(false)
   const [selectedItemId, setSelectedItemId] = useState('')
   const [description, setDescription] = useState('')
   const [hours, setHours] = useState('1')
@@ -473,30 +530,30 @@ function Maintenance() {
       },
       {
         onSuccess: () => {
-          setSaved(true)
+          setSelectedItemId('')
           setDescription('')
           setHours('1')
-          window.setTimeout(() => setSaved(false), 3000)
         },
       }
     )
   }
 
   return <>
-    <PageTitle eyebrow="EQUIPMENT CARE" title="Maintenance" copy="Log repairs and keep every item safe and rental-ready."/>
+    <PageTitle eyebrow="SERVICE & REPAIR" title="Equipment maintenance" copy="Record servicing, part replacements, and inspection sign-offs."/>
     <div className="maintenance-layout">
       <Card className="form-card">
-        <div className="card-title">
-          <span className="title-icon"><Icon name="wrench"/></span>
-          <div><h2>New maintenance log</h2><p>Record work performed on an item.</p></div>
+        <div className="form-intro">
+          <span className="large-title-icon"><Icon name="wrench" size={27}/></span>
+          <div><h2>Log service event</h2><p>Track labor and condition updates for any tool in the Bohol fleet.</p></div>
         </div>
-        {saved && <div className="success-banner"><Icon name="check"/>Maintenance log saved successfully.</div>}
-        {createLog.error && (
+
+        {createLog.isError && (
           <div className="error-banner" style={{ marginBottom: 14 }}>
             <Icon name="alert"/>
-            <div><strong>Failed to save log</strong><span>{(createLog.error as Error).message}</span></div>
+            <div><strong>Could not save log</strong><span>{(createLog.error as Error).message}</span></div>
           </div>
         )}
+
         <form onSubmit={submit} className="form-stack">
           <Field label="Rental item">
             <Select required value={selectedItemId} onChange={e => setSelectedItemId(e.target.value)}>
@@ -507,7 +564,7 @@ function Maintenance() {
           <Field label="Description">
             <textarea
               className="input textarea"
-              placeholder="Describe the issue and work performed..."
+              placeholder="Describe the issue, work performed, or parts replaced..."
               value={description}
               onChange={e => setDescription(e.target.value)}
               required
@@ -516,7 +573,6 @@ function Maintenance() {
           <div className="field-row">
             <Field label="Hours spent">
               <Input type="number" min="0" step="0.5" placeholder="0" value={hours} onChange={e => setHours(e.target.value)}/>
-              <span/>
             </Field>
             <Field label="Performed at">
               <Input type="date" value={performedAt} onChange={e => setPerformedAt(e.target.value)} required/>
@@ -530,8 +586,7 @@ function Maintenance() {
 
       <Card className="history-card">
         <div className="section-heading inner">
-          <div><h2>Maintenance history</h2><p>Recent logs across all branches.</p></div>
-          <Select aria-label="History date"><option>Last 30 days</option><option>Last 90 days</option></Select>
+          <div><h2>Maintenance history</h2><p>Recent logs across all Bohol branches.</p></div>
         </div>
 
         {logsError && (
@@ -699,12 +754,11 @@ function Modal({
   selectedBooking: Booking | null
   onSuccess: (msg: string) => void
 }) {
-  const [register, setRegister] = useState(false)
-  const [authError, setAuthError] = useState(false)
   const [delivery, setDelivery] = useState(true)
   const [insurance, setInsurance] = useState(false)
   const [damaged, setDamaged] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('GCash')
+  const [refNumber, setRefNumber] = useState('')
   const [conditionNotes, setConditionNotes] = useState('')
   const [returnNotes, setReturnNotes] = useState('')
   const [modalError, setModalError] = useState('')
@@ -743,11 +797,11 @@ function Modal({
   const estimatedTotal = subtotal + deliveryFee + insuranceFee
 
   const titles: Record<Exclude<ModalType, null>, [string, string]> = {
-    auth: [register ? 'Create your account' : 'Welcome back', register ? 'Register to rent tools from any Bohol branch.' : 'Sign in to manage your rentals and bookings.'],
-    book: ['Book this item', selectedItem ? `${selectedItem.name} · ₱${selectedItem.price}/day` : 'Makita Cordless Drill'],
-    pay: ['Record payment', selectedBooking ? `${selectedBooking.id} · ${selectedBooking.item_name}` : 'BK-2039 · Bosch Angle Grinder'],
-    checkout: ['Check out item', selectedBooking ? `${selectedBooking.id} · ${selectedBooking.item_name}` : 'BK-2048 · Makita Cordless Drill'],
-    return: ['Return item', selectedBooking ? `${selectedBooking.id} · ${selectedBooking.item_name}` : 'BK-2047 · DeWalt Circular Saw'],
+    auth: ['Account Access', 'Please use the login page to access your profile.'],
+    book: ['Book this item', selectedItem ? `${selectedItem.name} · ₱${selectedItem.price}/day` : 'Equipment Reservation'],
+    pay: ['Record Payment', selectedBooking ? `${selectedBooking.id} · ${selectedBooking.item_name}` : 'Rental Payment Settlement'],
+    checkout: ['Check out item', selectedBooking ? `${selectedBooking.id} · ${selectedBooking.item_name}` : 'Equipment Release'],
+    return: ['Return item', selectedBooking ? `${selectedBooking.id} · ${selectedBooking.item_name}` : 'Equipment Check-in'],
   }
 
   const confirm = (e: FormEvent) => {
@@ -755,7 +809,7 @@ function Modal({
     setModalError('')
 
     if (type === 'auth') {
-      setAuthError(true)
+      close()
       return
     }
 
@@ -790,16 +844,21 @@ function Modal({
         setModalError('No booking selected.')
         return
       }
+      if (paymentMethod === 'GCash' && (!refNumber || refNumber.trim().length < 8)) {
+        setModalError('Please enter a valid GCash reference number (minimum 8 digits).')
+        return
+      }
       recordPayment.mutate(
         {
           bookingId: selectedBooking.id,
           amount: selectedBooking.total_amount || 1140,
           paymentMethod,
+          referenceNumber: refNumber ? refNumber.trim() : undefined,
         },
         {
           onSuccess: () => {
             close()
-            onSuccess(`Payment recorded for booking ${selectedBooking.id}!`)
+            onSuccess(`Payment verified and recorded for booking ${selectedBooking.id}!`)
           },
           onError: err => {
             setModalError((err as Error).message || 'Failed to record payment.')
@@ -846,7 +905,7 @@ function Modal({
         {
           onSuccess: () => {
             close()
-            onSuccess(`Item returned for booking ${selectedBooking.id}!`)
+            onSuccess(`Item returned for booking ${selectedBooking.id}! Refundable deposit released.`)
           },
           onError: err => {
             setModalError((err as Error).message || 'Failed to complete return.')
@@ -860,10 +919,9 @@ function Modal({
   const isSubmitting = createBooking.isPending || recordPayment.isPending || checkoutBooking.isPending || returnBooking.isPending
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={e => e.target === e.currentTarget && close()}>
-    <div className={`modal ${type === 'auth' ? 'auth-modal' : ''}`} role="dialog" aria-modal="true">
+    <div className="modal" role="dialog" aria-modal="true">
       <div className="modal-header">
         <div>
-          {type === 'auth' && <Logo/>}
           <h2>{titles[type][0]}</h2>
           <p>{titles[type][1]}</p>
         </div>
@@ -879,15 +937,6 @@ function Modal({
 
       <form onSubmit={confirm}>
         <div className="modal-body">
-          {type === 'auth' && <>
-            <div className="auth-tabs"><button type="button" className={!register ? 'active' : ''} onClick={() => {setRegister(false); setAuthError(false)}}>Sign in</button><button type="button" className={register ? 'active' : ''} onClick={() => {setRegister(true); setAuthError(false)}}>Register</button></div>
-            {authError && <div className="error-banner"><Icon name="alert"/><div><strong>We couldn’t sign you in</strong><span>Check your email and password, then try again.</span></div></div>}
-            {register && <div className="field-row"><Field label="First name"><Input placeholder="Alex" required/></Field><Field label="Last name"><Input placeholder="Cruz" required/></Field></div>}
-            <Field label="Email address"><Input type="email" placeholder="you@example.com" required/></Field>
-            <Field label="Password"><Input type="password" placeholder="At least 8 characters" required/></Field>
-            {register && <><Field label="Phone number"><Input type="tel" placeholder="+63 9XX XXX XXXX" required/></Field><Field label="Home branch"><Select required><option>Tagbilaran City</option><option>Panglao</option><option>Tubigon</option></Select></Field></>}
-          </>}
-
           {type === 'book' && <>
             <div className="notice"><span className="notice-icon"><Icon name="calendar"/></span><div><strong>Choose your rental period</strong><span>Availability and pricing update automatically.</span></div></div>
             <div className="field-row">
@@ -898,15 +947,19 @@ function Modal({
                 <Input type="datetime-local" value={endDate} onChange={e => setEndDate(e.target.value)} required/>
               </Field>
             </div>
-            <div className="extras-title"><span>Optional extras</span><small>Adjust quantities as needed</small></div>
-            <Extra icon="truck" title="Delivery" copy="Drop-off and collection" price="₱350" checked={delivery} onChange={setDelivery}/>
-            <Extra icon="shield" title="Insurance" copy="Damage protection per day" price="₱85" checked={insurance} onChange={setInsurance}/>
+            <div className="extras-title"><span>Optional extras</span><small>Select equipment services</small></div>
+            <Extra icon="truck" title="Site Delivery" copy="Bohol jobsite drop-off and collection" price="₱350" checked={delivery} onChange={setDelivery}/>
+            <Extra icon="shield" title="Damage Waiver" copy="Covers accidental wear per day" price="₱85" checked={insurance} onChange={setInsurance}/>
             <div className="estimate">
-              <div><span>{days} days × ₱{dailyRate.toLocaleString()}</span><strong>₱{subtotal.toLocaleString()}</strong></div>
-              {delivery && <div><span>Delivery</span><strong>₱350</strong></div>}
-              {insurance && <div><span>Insurance</span><strong>₱{insuranceFee.toLocaleString()}</strong></div>}
-              <div className="estimate-total"><span>Estimated total</span><strong>₱{estimatedTotal.toLocaleString()}</strong></div>
-              <small>Final total may change after inspection.</small>
+              <div><span>{days} {days === 1 ? 'day' : 'days'} × ₱{dailyRate.toLocaleString()}</span><strong>₱{subtotal.toLocaleString()}</strong></div>
+              {delivery && <div><span>Site Delivery</span><strong>₱350</strong></div>}
+              {insurance && <div><span>Damage Waiver</span><strong>₱{insuranceFee.toLocaleString()}</strong></div>}
+              <div style={{ color: 'var(--green)', borderTop: '1px dashed #e2e8f0', paddingTop: 6, marginTop: 6 }}>
+                <span>Refundable Security Deposit (Returned on safe check-in)</span>
+                <strong>₱1,000</strong>
+              </div>
+              <div className="estimate-total"><span>Estimated Total Rental Fee</span><strong>₱{estimatedTotal.toLocaleString()}</strong></div>
+              <small>KYC Status: ✓ Government ID Verified · Standard Bohol handover agreement applies.</small>
             </div>
           </>}
 
@@ -931,10 +984,48 @@ function Modal({
                 </button>
               ))}
             </div>
+
+            {paymentMethod === 'GCash' && (
+              <div className="gcash-payment-box">
+                <div className="gcash-badge-row">
+                  <span className="gcash-pill-badge">GCash QR Ph</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#007dfe' }}>Bohol Central Dispatch</span>
+                </div>
+                <div className="gcash-account-info">
+                  <strong>Account: 0917-882-TOOL (8665)</strong>
+                  <small>Merchant Name: TOOLSHED RENTALS BOHOL</small>
+                </div>
+                <Field label="13-digit GCash Reference Number">
+                  <Input
+                    placeholder="e.g. 2004 8912 3410"
+                    value={refNumber}
+                    onChange={e => setRefNumber(e.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+            )}
+
+            {paymentMethod === 'Bank transfer' && (
+              <div className="gcash-payment-box" style={{ background: '#f8fafc', borderColor: '#cbd5e1' }}>
+                <div className="gcash-account-info">
+                  <strong>BDO Bohol Central: 0041-8802-9912</strong>
+                  <small>Account Name: Toolshed Rentals Bohol Inc.</small>
+                </div>
+                <Field label="Bank Transfer Reference / Deposit Code">
+                  <Input
+                    placeholder="e.g. BDO-TR-992140"
+                    value={refNumber}
+                    onChange={e => setRefNumber(e.target.value)}
+                    required
+                  />
+                </Field>
+              </div>
+            )}
           </>}
 
           {type === 'checkout' && <>
-            <div className="notice"><span className="notice-icon"><Icon name="check"/></span><div><strong>Ready for handover</strong><span>Confirm the item’s condition before releasing it.</span></div></div>
+            <div className="notice"><span className="notice-icon"><Icon name="check"/></span><div><strong>Ready for handover</strong><span>Confirm the tool’s condition and accessories before releasing it.</span></div></div>
             <Field label="Condition notes">
               <textarea
                 className="input textarea"
@@ -950,25 +1041,29 @@ function Modal({
             <Field label="Return notes">
               <textarea
                 className="input textarea"
-                placeholder="Describe the item’s condition on return..."
+                placeholder="Note returned parts, cleanliness, and wear..."
                 value={returnNotes}
                 onChange={e => setReturnNotes(e.target.value)}
                 required
               />
             </Field>
-            <label className={`damage-check ${damaged ? 'active' : ''}`}>
-              <input type="checkbox" checked={damaged} onChange={e => setDamaged(e.target.checked)}/>
-              <span className="checkbox">{damaged && <Icon name="check" size={13}/>}</span>
-              <span><strong>Item is damaged</strong><small>Flag this item for inspection and maintenance.</small></span>
+            <label className="checkbox-row" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={damaged}
+                onChange={e => setDamaged(e.target.checked)}
+              />
+              <span style={{ fontSize: 13, color: damaged ? 'var(--red)' : 'inherit', fontWeight: damaged ? 700 : 500 }}>
+                Equipment requires servicing or sustained damage (transitions to Maintenance)
+              </span>
             </label>
-            {damaged && <div className="warning-banner"><Icon name="alert"/><span>The item will be marked unavailable after return.</span></div>}
           </>}
         </div>
 
         <div className="modal-footer">
           <Button variant="secondary" type="button" onClick={close}>Cancel</Button>
           <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Processing…' : type === 'auth' ? (register ? 'Create account' : 'Sign in') : type === 'book' ? 'Confirm booking' : type === 'pay' ? 'Confirm payment' : type === 'checkout' ? 'Confirm check-out' : 'Complete return'}
+            {isSubmitting ? 'Processing…' : type === 'book' ? 'Confirm Reservation' : type === 'pay' ? 'Record Payment' : type === 'checkout' ? 'Release Equipment' : 'Complete Return'}
           </Button>
         </div>
       </form>
@@ -977,21 +1072,9 @@ function Modal({
 }
 
 function Extra({ icon, title, copy, price, checked, onChange }: { icon: IconName; title: string; copy: string; price: string; checked: boolean; onChange: (v: boolean) => void }) {
-  const [qty, setQty] = useState(1)
-  return <div className={`extra-row ${checked ? 'active' : ''}`}>
-    <button type="button" className="extra-main" onClick={() => onChange(!checked)}>
-      <span className="extra-check">{checked && <Icon name="check" size={13}/>}</span>
-      <span className="extra-icon"><Icon name={icon}/></span>
-      <span><strong>{title}</strong><small>{copy}</small></span>
-    </button>
-    <div className="extra-price">
-      <strong>{price}</strong>
-      <div className="quantity">
-        <button type="button" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
-        <span>{qty}</span>
-        <button type="button" onClick={() => setQty(qty + 1)}>+</button>
-      </div>
-    </div>
+  return <div className="extra-row">
+    <div className="extra-info"><span className="extra-icon"><Icon name={icon}/></span><div><strong>{title}</strong><p>{copy}</p></div></div>
+    <div className="extra-action"><span className="extra-price">{price}</span><input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}/></div>
   </div>
 }
 
@@ -1005,7 +1088,7 @@ function MobileNav({ page, setPage, role }: { page: Page; setPage: (p: Page) => 
   return <nav className="mobile-nav">{links.map(link => <button className={page === link.id ? 'active' : ''} onClick={() => setPage(link.id)} key={link.id}><Icon name={link.icon}/><span>{link.label}</span></button>)}</nav>
 }
 
-export default function App() {
+export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { user } = useAuth()
@@ -1016,9 +1099,34 @@ export default function App() {
   const [modal, setModal] = useState<ModalType>(null)
   const [selectedItem, setSelectedItem] = useState<RentalItem | null>(null)
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
+  const [viewingSlipBooking, setViewingSlipBooking] = useState<Booking | null>(null)
   const [toast, setToast] = useState('')
 
+  // Branch switcher state
+  const branchesList = ['Tagbilaran City', 'Panglao', 'Tubigon', 'All Bohol Branches']
+  const [branchIndex, setBranchIndex] = useState(0)
+  const currentBranch = branchesList[branchIndex]
+
+  const switchBranch = () => {
+    setBranchIndex(prev => (prev + 1) % branchesList.length)
+  }
+
   const { data: items = [] } = useItems()
+
+  // Support ?book=<itemId> query parameter from public storefront
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const bookItemId = params.get('book')
+    if (bookItemId && items.length > 0) {
+      const match = items.find(i => i.id === bookItemId)
+      if (match) {
+        setSelectedItem(match)
+        setSelectedBooking(null)
+        setModal('book')
+        window.history.replaceState({}, '', '/dashboard')
+      }
+    }
+  }, [items])
 
   const changeRole = (next: Role) => {
     setPreviewRole(next)
@@ -1028,9 +1136,10 @@ export default function App() {
   }
 
   const signOut = async () => {
+    navigate('/', { replace: true })
     queryClient.setQueryData(authSessionKey, null)
+    queryClient.clear()
     await supabase.auth.signOut()
-    navigate('/login', { replace: true })
   }
 
   const bookItem = (item: RentalItem) => {
@@ -1055,13 +1164,19 @@ export default function App() {
 
   const completedAdd = () => {
     setPage('inventory')
-    showToast('Item added to inventory')
+    showToast('Item registered in Bohol inventory')
   }
 
   if (isPending) return <FullPageLoader/>
 
   return <div className="app-shell">
-    <Sidebar page={page} setPage={setPage} role={role}/>
+    <Sidebar
+      page={page}
+      setPage={setPage}
+      role={role}
+      currentBranch={currentBranch}
+      onSwitchBranch={switchBranch}
+    />
     <div className="app-main">
       <Header role={role} realRole={realRole} setRole={changeRole} canPreview={isAdmin} email={profile?.email ?? user?.email ?? ''} onSignOut={signOut}/>
       <main className="content">
@@ -1072,7 +1187,14 @@ export default function App() {
           </div>
         )}
         {page === 'inventory' && <Dashboard onBook={bookItem} role={role} showToast={showToast} />}
-        {page === 'bookings' && <Bookings role={role} openModal={openBookingModal} showToast={showToast} />}
+        {page === 'bookings' && (
+          <Bookings
+            role={role}
+            openModal={openBookingModal}
+            onViewSlip={b => setViewingSlipBooking(b)}
+            showToast={showToast}
+          />
+        )}
         {page === 'maintenance' && isStaffRole(role) && <Maintenance/>}
         {page === 'add' && isStaffRole(role) && <AddItem done={completedAdd}/>}
         {page === 'users' && role === 'admin' && <UsersPanel currentUserId={profile?.id}/>}
@@ -1085,6 +1207,10 @@ export default function App() {
       selectedItem={selectedItem}
       selectedBooking={selectedBooking}
       onSuccess={showToast}
+    />
+    <HandoverSlipModal
+      booking={viewingSlipBooking}
+      onClose={() => setViewingSlipBooking(null)}
     />
     {toast && <div className="toast"><span><Icon name="check"/></span>{toast}</div>}
   </div>

@@ -47,4 +47,5 @@ begin
 end;
 $$;
 
-grant execute on function public.reset_all_inventory_available() to authenticated, anon;
+-- Restrict execution strictly to authenticated users (admin verification inside function)
+grant execute on function public.reset_all_inventory_available() to authenticated;

@@ -62,6 +62,8 @@ export function useBookings() {
         const dailyRate = Number(b.daily_rate ?? 0)
         const startDate = b.start_at ?? b.start_date
         const endDate = b.end_at ?? b.end_date
+        const normalizedStatus = normalizeBookingStatus(b.status)
+        const isOverdue = normalizedStatus === 'Checked out' && Boolean(endDate) && new Date(endDate).getTime() < Date.now()
 
         return {
           ...b,
@@ -75,9 +77,11 @@ export function useBookings() {
           rental_days: b.rental_days ?? 1,
           rental_subtotal: Number(b.rental_subtotal ?? dailyRate),
           extras_total: Number(b.extras_total ?? 0),
+          security_deposit: Number(b.security_deposit ?? 1000),
+          is_overdue: isOverdue,
           total_amount: total,
           total,
-          status: normalizeBookingStatus(b.status),
+          status: normalizedStatus,
           payment_status: normalizePaymentStatus(b.payment_status),
           item_name: b.items?.name ?? 'Unknown equipment',
           branch_name: b.items?.branches?.name ?? '',
